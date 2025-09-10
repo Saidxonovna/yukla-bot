@@ -120,6 +120,7 @@ async def button_handler(event):
 
 @client.on(events.NewMessage(pattern='/start'))
 async def start_handler(event):
+    # Javob matniga "YANGI VERSIYA" so'zi qo'shildi
     await event.reply("Assalomu alaykum! Video yuklash uchun YouTube yoki Instagram havolasini yuboring.")
 
 async def main():
