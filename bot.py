@@ -100,11 +100,14 @@ async def hybrid_download(event, url):
             
             if data and data.get("status") == "stream":
                 logging.info(f"{api_url} orqali muvaffaqiyatli yuklandi.")
-                break  # Muvaffaqiyatli bo'lsa, siklni to'xtatish
+                break
             else:
                 last_error = data.get('text', 'Noma\'lum xato.')
         except httpx.HTTPStatusError as e:
             last_error = f"Servis xatosi: {e.response.status_code}."
+            logging.warning(f"{api_url} ishlamadi: {last_error}")
+        except httpx.ConnectError:
+            last_error = "Servisga ulanib bo'lmadi (tarmoq muammosi)."
             logging.warning(f"{api_url} ishlamadi: {last_error}")
         except httpx.ReadTimeout:
             last_error = "Yuklash vaqti tugadi."
