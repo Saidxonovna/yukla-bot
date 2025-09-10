@@ -24,11 +24,11 @@ async def download_and_send_video(event, url):
     processing_message = None
     try:
         if isinstance(event, events.CallbackQuery.Event):
-            processing_message = await event.edit("⏳ Havola qabul qilindi. Yuklash jarayoni boshlanmoqda...")
+            processing_message = await event.edit("⏳Yuklash jarayoni boshlandi...")
         else:
-            processing_message = await event.reply("⏳ Havola qabul qilindi. Yuklash jarayoni boshlanmoqda...")
+            processing_message = await event.reply("⏳Yuklash jarayoni boshlandi...")
     except Exception:
-        processing_message = await client.send_message(chat_id, "⏳ Havola qabul qilindi. Yuklash jarayoni boshlanmoqda...")
+        processing_message = await client.send_message(chat_id, "⏳Yuklash jarayoni boshlandi...")
 
     file_path = None
     try:
@@ -49,7 +49,7 @@ async def download_and_send_video(event, url):
             await client.edit_message(processing_message, "❌ Kechirasiz, videoni yuklab bo'lmadi.")
             return
 
-        await client.edit_message(processing_message, "✅ Yuborilmoqda...")
+        await client.edit_message(processing_message, "📤Yuborilmoqda...")
         
         # === INSTAGRAM OPISANIYASINI OLISH UCHUN QO'SHILGAN YANGI QISM ===
         description = None
@@ -60,7 +60,7 @@ async def download_and_send_video(event, url):
         await client.send_file(
             chat_id,
             file_path,
-            caption="Video @Allsavervide0bot tomonidan yuklandi !"
+            caption="Yordamim tekanidan hursandman, @Allsavervide0bot!"
         )
         await client.delete_messages(chat_id, processing_message)
 
@@ -68,7 +68,7 @@ async def download_and_send_video(event, url):
         if description and description.strip():
             # Matn uzun bo'lsa, Telegram chegarasiga moslab bo'lib yuborish
             for i in range(0, len(description), 4096):
-                await client.send_message(chat_id, f"{description[i:i+4096]}n\**Video @Allsavervide0bot tomonidan yuklandi!**")
+                await client.send_message(chat_id, f"{description[i:i+4096]}n\**Yordamim tekanidan hursandman, @Allsavervide0bot!**")
         # =================================================================
 
     except Exception as e:
@@ -135,6 +135,10 @@ async def main():
     print("Bot ishga tushdi...")
     await client.run_until_disconnected()
 
+@client.on(events.NewMessage(pattern='/start'))
+async def start_handler(event):
+    # Javob matniga "YANGI VERSIYA" so'zi qo'shildi
+    await event.reply("Assalomu alaykum! BU YANGI VERSIYA. Video yuklash uchun havolani yuboring.")
 
 if __name__ == '__main__':
     asyncio.run(main())
