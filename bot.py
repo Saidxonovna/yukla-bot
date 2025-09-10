@@ -23,11 +23,11 @@ def progress_callback(current, total, start_time, message, file_name):
     elapsed_time = time.time() - start_time
     if elapsed_time == 0:
         return
-    
+
     speed = current / elapsed_time
     percentage = current * 100 / total
     progress_str = "[{:<20}] {:.1f}%".format('=' * int(percentage / 5), percentage)
-    
+
     if int(elapsed_time) % 3 == 0 or current == total:
         try:
             asyncio.create_task(
@@ -55,9 +55,7 @@ async def video_handler(event):
     processing_message = await event.reply("⏳ Havola qabul qilindi. Yuklash jarayoni boshlanmoqda...")
 
     try:
-        # ===== KODGA QO'SHILGAN YANGI QISM =====
-        # yt-dlp sozlamalariga cookie faylni qo'shish
-       ydl_opts = {
+        ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'outtmpl': '%(title)s.%(ext)s',
             'noplaylist': True,
@@ -65,7 +63,6 @@ async def video_handler(event):
             # VIDEONING VAQTINI TO'G'RI KO'RSATISH UCHUN QO'SHILDI:
             'postprocessor_args': ['-movflags', '+faststart']
         }
-        # =======================================
 
         file_path = None
         with YoutubeDL(ydl_opts) as ydl:
@@ -103,16 +100,13 @@ async def video_handler(event):
 
 
 async def main():
-    # ===== KODGA QO'SHILGAN YANGI QISM =====
     # Bot ishga tushishidan oldin cookie faylni yaratish
-    # Bu kod YOUTUBE_COOKIES o'zgaruvchisidan ma'lumotni olib, cookies.txt fayliga yozadi
     if 'YOUTUBE_COOKIES' in os.environ:
         logging.info("YouTube cookies topildi, cookies.txt fayliga yozilmoqda...")
         with open('cookies.txt', 'w') as f:
             f.write(os.environ['YOUTUBE_COOKIES'])
     else:
         logging.warning("YOUTUBE_COOKIES muhit o'zgaruvchisi topilmadi. Ayrim videolar yuklanmasligi mumkin.")
-    # =======================================
 
     await client.start(bot_token=BOT_TOKEN)
     print("Bot ishga tushdi va xabarlarni kutmoqda...")
