@@ -22,7 +22,6 @@ except (ValueError, TypeError):
     logging.critical("API_ID, API_HASH yoki BOT_TOKEN topilmadi yoki noto'g'ri formatda!")
     exit(1)
 
-# <<< IZOH: Fayl hajmi uchun cheklov 1 GB qilib o'rnatildi ---
 MAX_FILE_SIZE_LIMIT = 1 * 1024 * 1024 * 1024  # 1 Gigabayt
 
 # Telethon klientini yaratish
@@ -43,7 +42,6 @@ BASE_YDL_OPTS = {
 
 # --- YORDAMCHI FUNKSIYA ---
 async def safe_edit_message(message, text, **kwargs):
-    """Xabarni xavfsiz tahrirlaydi."""
     if not message or not hasattr(message, 'text') or message.text == text:
         return
     try:
@@ -53,7 +51,7 @@ async def safe_edit_message(message, text, **kwargs):
     except Exception as e:
         logging.warning(f"Xabarni tahrirlashda kutilmagan xatolik: {e}")
 
-# --- ASOSIY YUKLASH FUNKSIYASI (SODDALASHTIRILGAN) ---
+# --- ASOSIY YUKLASH FUNKSIYASI (XATOLIK TUZATILGAN) ---
 async def download_and_send_video(event, url):
     chat_id = event.chat_id
     processing_message = None
@@ -69,16 +67,24 @@ async def download_and_send_video(event, url):
         return
 
     try:
+        # <<< IZOH: Asosiy thread'dagi joriy event loop'ni olamiz
+        loop = asyncio.get_running_loop()
         last_update = 0
+
+        # <<< IZOH: progress_hook funksiyasi asosiy funksiya ichida e'lon qilinadi.
+        # Shunda u yuqoridagi 'loop' o'zgaruvchisidan bemalol foydalana oladi.
         def progress_hook(d):
             nonlocal last_update
             if d['status'] == 'downloading':
                 current_time = time.time()
                 if current_time - last_update > 3 and all(k in d for k in ('_percent_str', '_speed_str', '_eta_str')):
                     progress_text = f"📥 **Serverga yuklanmoqda...**\n`{d['_percent_str']} | {d['_speed_str']} | {d['_eta_str']}`"
+                    
+                    # <<< IZOH: Xatolik berayotgan qator. Endi u to'g'ri ishlaydi.
+                    # Oldindan olingan 'loop' o'zgaruvchisi ishlatiladi.
                     asyncio.run_coroutine_threadsafe(
                         safe_edit_message(processing_message, progress_text),
-                        asyncio.get_event_loop()
+                        loop
                     )
                     last_update = current_time
 
@@ -86,7 +92,6 @@ async def download_and_send_video(event, url):
         local_ydl_opts['progress_hooks'] = [progress_hook]
 
         with YoutubeDL(local_ydl_opts) as ydl:
-            loop = asyncio.get_event_loop()
             info_dict = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
             file_path = ydl.prepare_filename(info_dict)
 
@@ -95,7 +100,6 @@ async def download_and_send_video(event, url):
             return
 
         file_size = os.path.getsize(file_path)
-        # <<< IZOH: Fayl hajmi yangi cheklov (1 GB) bilan solishtirilmoqda
         if file_size > MAX_FILE_SIZE_LIMIT:
             error_msg = f"❌ Video hajmi juda katta ({file_size / 1024 / 1024:.1f} MB).\nFaqat 1 GB gacha bo'lgan videolarni yuklash mumkin."
             await safe_edit_message(processing_message, error_msg)
@@ -136,19 +140,38 @@ async def main_handler(event):
     url_match = re.search(r'https?://\S+', event.text)
     if not url_match: return
     url = url_match.group(0)
+
+    # Playlist'larni alohida ishlash
     if "list=" in url or "/playlist?" in url:
-        # ... playlist logikasi ...
-        pass # Bu qism o'zgarishsiz qoladi
+        playlist_msg = await event.reply("⏳ Playlist tahlil qilinmoqda...")
+        try:
+            ydl_opts = {'extract_flat': True, 'playlistend': 10}
+            with YoutubeDL(ydl_opts) as ydl:
+                info_dict = ydl.extract_info(url, download=False)
+            buttons = [
+                [Button.inline(entry.get('title', 'Nomsiz video')[:60], data=f"dl_{entry.get('id')}")
+                 ] for entry in info_dict.get('entries', []) if entry]
+            if not buttons:
+                await playlist_msg.edit("❌ Playlist'dan videolarni olib bo'lmadi.")
+                return
+            await playlist_msg.edit(f"**'{info_dict.get('title')}'** playlisti topildi.\nQuyidagilardan birini tanlang:", buttons=buttons)
+        except Exception as e:
+            await playlist_msg.edit(f"❌ Playlist'ni o'qishda xatolik: {e}")
     else:
         await download_and_send_video(event, url)
+
 @client.on(events.CallbackQuery(pattern=b"dl_"))
 async def button_handler(event):
-    # ... tugma logikasi ...
-    pass # Bu qism o'zgarishsiz qoladi
+    video_id = event.data.decode('utf-8').split('_', 1)[1]
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+    await download_and_send_video(event, video_url)
+
 @client.on(events.NewMessage(pattern='/start'))
 async def start_handler(event):
-    # ... start logikasi ...
-    pass # Bu qism o'zgarishsiz qoladi
+    await event.reply(
+        "Assalomu alaykum! Men YouTube va Instagram'dan ommaviy videolar yuklab beraman.\n\n"
+        "Shunchaki video havolasini yuboring."
+    )
 
 # --- ASOSIY ISHGA TUSHIRISH FUNKSIYASI ---
 async def main():
