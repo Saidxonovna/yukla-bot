@@ -25,7 +25,31 @@ except (ValueError, TypeError):
 client = TelegramClient('bot_session', API_ID, API_HASH)
 
 
-# --- YORDAMCHI FUNKSIYA ---
+# --- YORDAMCHI FUNKSIYALAR ---
+
+def clean_url(url):
+    """Havoladan keraksiz parametrlarni olib tashlab, uni standart formatga keltiradi."""
+    # YouTube uchun naqshlar (watch, shorts, youtu.be)
+    yt_match = re.search(r'(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})', url)
+    if yt_match:
+        video_id = yt_match.group(1)
+        return f'https://www.youtube.com/watch?v={video_id}'
+
+    # Instagram uchun naqshlar (p, reel)
+    insta_match = re.search(r'(?:instagram\.com/(?:p|reel)/)([a-zA-Z0-9_-]+)', url)
+    if insta_match:
+        post_id = insta_match.group(1)
+        return f'https://www.instagram.com/p/{post_id}/'
+    
+    # TikTok uchun oddiy tozalash
+    tiktok_match = re.search(r'(tiktok\.com/.*/video/\d+)', url)
+    if tiktok_match:
+        return f'https://{tiktok_match.group(1)}'
+
+    # Agar mos format topilmasa, asl havolani qaytarish
+    return url
+
+
 async def safe_edit_message(message, text, **kwargs):
     """Xabarni xavfsiz tahrirlaydi."""
     if not message or not hasattr(message, 'text') or message.text == text:
@@ -57,9 +81,7 @@ async def hybrid_download(event, url):
     try:
         await safe_edit_message(processing_message, "ℹ️ Video ma'lumotlari olinmoqda...")
         ydl_opts_info = {
-            'quiet': True,
-            'no_warnings': True,
-            'skip_download': True,  # Eng muhimi: faqat ma'lumot olish
+            'quiet': True, 'no_warnings': True, 'skip_download': True,
         }
         with YoutubeDL(ydl_opts_info) as ydl:
             loop = asyncio.get_running_loop()
@@ -71,10 +93,7 @@ async def hybrid_download(event, url):
     # --- 2-QADAM: Cobalt API orqali videoni o'zini olish ---
     try:
         await safe_edit_message(processing_message, "🌎 Yuklash servisidan video so'ralmoqda...")
-
-        # <<< MUHIM: Bu ishonchli va rasmiy Cobalt API manzili
         api_url = "https://api.cobalt.tools/api/json"
-
         payload = {"url": url, "vQuality": "720"}
 
         async with httpx.AsyncClient(timeout=90) as client_http:
@@ -84,32 +103,26 @@ async def hybrid_download(event, url):
 
         if data.get("status") == "stream":
             video_url = data["url"]
-            # Ma'lumotlar yt-dlp'dan muvaffaqiyatli olingan bo'lsa, o'shani ishlatamiz
             video_title = info_dict.get('title', 'Yuklab olingan video') if info_dict else "Yuklab olingan video"
             description = info_dict.get('description') if info_dict else None
 
             await safe_edit_message(processing_message, "✅ Video topildi, Telegram'ga yuborilmoqda...")
-
             await client.send_file(
-                chat_id,
-                file=video_url,
-                caption=f"**{video_title}**\n\n@Allsavervide0bot orqali yuklandi"
+                chat_id, file=video_url, caption=f"**{video_title}**\n\n@Allsavervide0bot orqali yuklandi"
             )
 
-            # Agar tavsif mavjud bo'lsa, uni alohida yuborish
             if description and description.strip():
-                logging.info(f"Tavsif topildi, {len(description)} belgi yuborilmoqda...")
                 for i in range(0, len(description), 4096):
-                    chunk = description[i:i+4096]
-                    await client.send_message(chat_id, f"**📝 Video tavsifi:**\n\n{chunk}")
-
+                    await client.send_message(chat_id, f"**📝 Video tavsifi:**\n\n{description[i:i+4096]}")
+            
             await processing_message.delete()
         else:
             error_text = data.get('text', 'Noma\'lum xato. Bu havolani yuklab bo\'lmaydi.')
             await safe_edit_message(processing_message, f"❌ Xatolik: {error_text}")
 
-    except httpx.HTTPStatusError:
-        await safe_edit_message(processing_message, "❌ Video yuklash servisida vaqtinchalik muammo bor. Iltimos, keyinroq urinib ko'ring.")
+    except httpx.HTTPStatusError as e:
+        error_msg = f"❌ Video yuklash servisida vaqtinchalik muammo bor (Xato: {e.response.status_code})."
+        await safe_edit_message(processing_message, error_msg)
     except httpx.ReadTimeout:
         await safe_edit_message(processing_message, "❌ Video hajmi katta bo'lgani uchun yuklash vaqti tugadi.")
     except Exception as e:
@@ -122,13 +135,19 @@ async def hybrid_download(event, url):
 async def main_handler(event):
     url_match = re.search(r'https?://\S+', event.text)
     if not url_match: return
-    url = url_match.group(0)
+    
+    # MUHIM: Havolani tozalash
+    original_url = url_match.group(0)
+    cleaned_url = clean_url(original_url)
+    
+    logging.info(f"Asl havola: {original_url} -> Tozalangan havola: {cleaned_url}")
 
-    if "list=" in url or "/playlist?" in url:
+    if "list=" in cleaned_url: # Tozalangan havolada ham playlist bo'lishi mumkin
         await event.reply("Playlist'larni yuklash qo'llab-quvvatlanmaydi. Iltimos, alohida video havolasini yuboring.")
         return
 
-    await hybrid_download(event, url)
+    await hybrid_download(event, cleaned_url)
+
 
 @client.on(events.CallbackQuery())
 async def button_handler(event):
@@ -137,14 +156,14 @@ async def button_handler(event):
 @client.on(events.NewMessage(pattern='/start'))
 async def start_handler(event):
     await event.reply(
-        "Assalomu alaykum! Men YouTube va Instagram'dan videolar yuklab beraman.\n\n"
+        "Assalomu alaykum! Men YouTube, Instagram va TikTok'dan videolar yuklab beraman.\n\n"
         "Shunchaki video havolasini yuboring."
     )
 
 # --- ASOSIY ISHGA TUSHIRISH FUNKSIYASI ---
 async def main():
     await client.start(bot_token=BOT_TOKEN)
-    logging.info("Bot gibrid usulda muvaffaqiyatli ishga tushdi...")
+    logging.info("Bot gibrid usulda (havola tozalash bilan) muvaffaqiyatli ishga tushdi...")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
