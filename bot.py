@@ -103,9 +103,11 @@ async def download_and_send_video(event, url):
             loop = asyncio.get_event_loop()
             info_dict = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
             file_path = ydl.prepare_filename(info_dict)
-          if not file_path or not os.path.exists(file_path):
-            await safe_edit_message(processing_message, "❌ Kechirasiz, videoni yuklab bo'lmadi.")
-            return
+            # --- XATOLIK TUZATILDI ---
+            # Ushbu 'if' bloki 'with' bloki ichida to'g'ri joylashtirildi.
+            if not file_path or not os.path.exists(file_path):
+                await safe_edit_message(processing_message, "❌ Kechirasiz, videoni yuklab bo'lmadi.")
+                return
 
         # --- TELEGRAM'GA YUBORISH JARAYONINI KO'RSATISH ---
         async def upload_progress(current, total):
@@ -163,7 +165,7 @@ async def main_handler(event):
         except Exception as e:
             await playlist_msg.edit(f"❌ Playlist'ni o'qishda xatolik: {e}")
         finally:
-             if cookie_file and os.path.exists(cookie_file):
+            if cookie_file and os.path.exists(cookie_file):
                 os.remove(cookie_file)
     else:
         await download_and_send_video(event, url)
@@ -189,5 +191,7 @@ async def main():
     print("Bot muvaffaqiyatli ishga tushdi...")
     await client.run_until_disconnected()
 
-if name == 'main':
+# --- XATOLIK TUZATILDI ---
+# Skript to'g'ri ishga tushishi uchun 'if name == 'main':' 'if __name__ == '__main__':'-ga o'zgartirildi
+if __name__ == '__main__':
     asyncio.run(main())
