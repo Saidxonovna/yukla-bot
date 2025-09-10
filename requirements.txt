@@ -1,3 +1,4 @@
-Telethon
+telethon
+httpx
 yt-dlp
-ffmpeg-python
+
