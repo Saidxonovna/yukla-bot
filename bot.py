@@ -61,9 +61,9 @@ async def download_and_send_video(event, url):
     
     try:
         if isinstance(event, events.CallbackQuery.Event):
-            processing_message = await event.edit("⏳ Havola tekshirilmoqda...")
+            processing_message = await event.edit("⏳ Havola tekshirilmoqda..")
         else:
-            processing_message = await event.reply("⏳ Havola tekshirilmoqda...")
+            processing_message = await event.reply("⏳ Havola tekshirilmoqda..")
     except Exception as e:
         logging.error(f"Boshlang'ich xabarni yuborishda xatolik: {e}")
         return
