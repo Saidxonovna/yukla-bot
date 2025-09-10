@@ -113,5 +113,18 @@ async def main():
     await client.run_until_disconnected()
 
 
+async def main():
+    # Bot ishga tushishidan oldin cookie faylni yaratish
+    if 'PINTEREST_COOKIES' in os.environ:
+        logging.info("PINTEREST cookies topildi, cookies.txt fayliga yozilmoqda...")
+        with open('cookies.txt', 'w') as f:
+            f.write(os.environ['PINTEREST_COOKIES'])
+    else:
+        logging.warning("YOUTUBE_COOKIES muhit o'zgaruvchisi topilmadi. Ayrim videolar yuklanmasligi mumkin.")
+
+    await client.start(bot_token=BOT_TOKEN)
+    print("Bot ishga tushdi va xabarlarni kutmoqda...")
+    await client.run_until_disconnected()
+
 if __name__ == '__main__':
     asyncio.run(main())
