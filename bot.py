@@ -68,7 +68,7 @@ async def download_and_send_video(event, url):
         if description and description.strip():
             # Matn uzun bo'lsa, Telegram chegarasiga moslab bo'lib yuborish
             for i in range(0, len(description), 4096):
-                await client.send_message(chat_id, f"{description[i:i+4096]}**Video @Allsavervide0bot tomonidan yuklandi!**"n\n\)
+                await client.send_message(chat_id, f"{description[i:i+4096]}n\**Video @Allsavervide0bot tomonidan yuklandi!**")
         # =================================================================
 
     except Exception as e:
