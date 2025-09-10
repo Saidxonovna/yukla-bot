@@ -14,7 +14,8 @@ logging.basicConfig(format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s'
 
 # --- Railway'ning "Variables" bo'limidan olinadigan ma'lumotlar ---
 API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASHBOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 # IKKITA ALOHIDA COOKIE UCHUN O'ZGARUVCHILAR
 YOUTUBE_COOKIE = os.environ.get("YOUTUBE_COOKIE")
 INSTAGRAM_COOKIE = os.environ.get("INSTAGRAM_COOKIE")
