@@ -123,12 +123,13 @@ async def start_handler(event):
     await event.reply("Assalomu alaykum! Video yuklash uchun YouTube yoki Instagram havolasini yuboring.")
 
 async def main():
-    if 'YOUTUBE_COOKIES' in os.environ:
-        logging.info("YouTube/Instagram cookies topildi, cookies.txt fayliga yozilmoqda...")
+    # O'zgaruvchi nomi yangilandi
+    if 'WEBSITE_COOKIES' in os.environ:
+        logging.info("Website cookies topildi, cookies.txt fayliga yozilmoqda...")
         with open('cookies.txt', 'w') as f:
-            f.write(os.environ['YOUTUBE_COOKIES'])
+            f.write(os.environ['WEBSITE_COOKIES'])
     else:
-        logging.warning("YOUTUBE_COOKIES muhit o'zgaruvchisi topilmadi.")
+        logging.warning("WEBSITE_COOKIES muhit o'zgaruvchisi topilmadi.")
 
     await client.start(bot_token=BOT_TOKEN)
     print("Bot ishga tushdi...")
