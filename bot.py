@@ -10,18 +10,16 @@ from telethon import TelegramClient, events
 logging.basicConfig(format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s',
                     level=logging.INFO)
 
-# --- Muhim! Bularni Railway'ning "Variables" bo'limiga kiritasiz ---
+# --- Railway'ning "Variables" bo'limidan olinadi ---
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
 # Telethon klientini yaratish
-# 'bot_session' - bu session fayl nomi, Railway'da har restartda qayta login bo'ladi
 client = TelegramClient('bot_session', API_ID, API_HASH)
 
-# Yuklash progressini ko'rsatish uchun funksiya
+# Yuklash progressini ko'rsatish uchun funksiya (o'zgarishsiz)
 def progress_callback(current, total, start_time, message, file_name):
-    """Fayl yuborilayotganda progressni ko'rsatadi"""
     elapsed_time = time.time() - start_time
     if elapsed_time == 0:
         return
@@ -30,7 +28,6 @@ def progress_callback(current, total, start_time, message, file_name):
     percentage = current * 100 / total
     progress_str = "[{:<20}] {:.1f}%".format('=' * int(percentage / 5), percentage)
     
-    # Xabarni har 2-3 sekundda yangilab turish uchun
     if int(elapsed_time) % 3 == 0 or current == total:
         try:
             asyncio.create_task(
@@ -42,32 +39,31 @@ def progress_callback(current, total, start_time, message, file_name):
                 )
             )
         except:
-            pass # Xabar o'zgarmagan bo'lsa xatolik bermaslik uchun
+            pass
 
-
-# /start buyrug'i uchun
 @client.on(events.NewMessage(pattern='/start'))
 async def start_handler(event):
     await event.reply(
         "Assalomu alaykum!\n\nMen katta hajmdagi videolarni yuklovchi botman. Menga istalgan video havolasini (linkini) yuboring."
     )
 
-# Matnli xabarlar (havolalar) uchun
 @client.on(events.NewMessage(pattern=r'https?://\S+'))
 async def video_handler(event):
     url = event.text
     chat_id = event.chat_id
     
-    # Jarayon boshlanganini bildirish
     processing_message = await event.reply("⏳ Havola qabul qilindi. Yuklash jarayoni boshlanmoqda...")
 
     try:
-        # yt-dlp sozlamalari (50MB cheklovi olib tashlangan)
+        # ===== KODGA QO'SHILGAN YANGI QISM =====
+        # yt-dlp sozlamalariga cookie faylni qo'shish
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'outtmpl': '%(title)s.%(ext)s',
             'noplaylist': True,
+            'cookiefile': 'cookies.txt'  # Bu qator cookie fayldan foydalanishni aytadi
         }
+        # =======================================
 
         file_path = None
         with YoutubeDL(ydl_opts) as ydl:
@@ -79,13 +75,11 @@ async def video_handler(event):
             await client.edit_message(processing_message, "❌ Kechirasiz, videoni yuklab bo'lmadi.")
             return
 
-        # Videoni yuborish
         await client.edit_message(processing_message, "✅ Video yuklandi! Endi Telegramga yuborilmoqda...")
         
         file_name = os.path.basename(file_path)
         start_time = time.time()
 
-        # Asosiy yuborish funksiyasi
         await client.send_file(
             chat_id,
             file_path,
@@ -93,7 +87,6 @@ async def video_handler(event):
             progress_callback=lambda current, total: progress_callback(current, total, start_time, processing_message, file_name)
         )
         
-        # Jarayon tugagach xabarni o'chirish
         await client.delete_messages(chat_id, processing_message)
 
     except Exception as e:
@@ -103,20 +96,26 @@ async def video_handler(event):
             f"❌ Kechirasiz, xatolik yuz berdi.\n\n**Texnik ma'lumot:** `{str(e)}`"
         )
     finally:
-        # Yuklangan faylni serverdan o'chirish (Juda muhim!)
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
 
 async def main():
-    # Bot sifatida tizimga kirish
+    # ===== KODGA QO'SHILGAN YANGI QISM =====
+    # Bot ishga tushishidan oldin cookie faylni yaratish
+    # Bu kod YOUTUBE_COOKIES o'zgaruvchisidan ma'lumotni olib, cookies.txt fayliga yozadi
+    if 'YOUTUBE_COOKIES' in os.environ:
+        logging.info("YouTube cookies topildi, cookies.txt fayliga yozilmoqda...")
+        with open('cookies.txt', 'w') as f:
+            f.write(os.environ['YOUTUBE_COOKIES'])
+    else:
+        logging.warning("YOUTUBE_COOKIES muhit o'zgaruvchisi topilmadi. Ayrim videolar yuklanmasligi mumkin.")
+    # =======================================
+
     await client.start(bot_token=BOT_TOKEN)
     print("Bot ishga tushdi va xabarlarni kutmoqda...")
-    # Botni o'chirmasdan ishlashini ta'minlash
     await client.run_until_disconnected()
 
 
 if __name__ == '__main__':
-    # Asinxron dasturni ishga tushirish
     asyncio.run(main())
-    
