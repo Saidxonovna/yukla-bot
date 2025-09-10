@@ -57,11 +57,13 @@ async def video_handler(event):
     try:
         # ===== KODGA QO'SHILGAN YANGI QISM =====
         # yt-dlp sozlamalariga cookie faylni qo'shish
-        ydl_opts = {
+       ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'outtmpl': '%(title)s.%(ext)s',
             'noplaylist': True,
-            'cookiefile': 'cookies.txt'  # Bu qator cookie fayldan foydalanishni aytadi
+            'cookiefile': 'cookies.txt',
+            # VIDEONING VAQTINI TO'G'RI KO'RSATISH UCHUN QO'SHILDI:
+            'postprocessor_args': ['-movflags', '+faststart']
         }
         # =======================================
 
