@@ -64,6 +64,9 @@ async def download_and_send_video(event, url):
     processing_message = None
     cookie_file = None
     file_path = None
+    # --- XATOLIK TUZATILDI ---
+    # Joriy asyncio siklini o'zgaruvchiga saqlab olamiz
+    loop = asyncio.get_running_loop()
 
     try:
         if isinstance(event, events.CallbackQuery.Event):
@@ -84,9 +87,11 @@ async def download_and_send_video(event, url):
                     speed = d['_speed_str']
                     eta = d['_eta_str']
                     progress_text = f"📥Yuklanmoqda...\n\n{percentage} | {speed} | {eta}"
+                    # --- XATOLIK TUZATILDI ---
+                    # Boshqa thread'dan xavfsiz murojaat qilish uchun avvaldan olingan sikldan foydalanamiz
                     asyncio.run_coroutine_threadsafe(
                         safe_edit_message(processing_message, progress_text),
-                        asyncio.get_event_loop()
+                        loop
                     )
                     last_update = current_time
 
@@ -100,7 +105,6 @@ async def download_and_send_video(event, url):
         }
 
         with YoutubeDL(ydl_opts) as ydl:
-            loop = asyncio.get_event_loop()
             info_dict = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
             file_path = ydl.prepare_filename(info_dict)
             # --- XATOLIK TUZATILDI ---
@@ -195,3 +199,4 @@ async def main():
 # Skript to'g'ri ishga tushishi uchun 'if name == 'main':' 'if __name__ == '__main__':'-ga o'zgartirildi
 if __name__ == '__main__':
     asyncio.run(main())
+
