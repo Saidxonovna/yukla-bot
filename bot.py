@@ -127,7 +127,7 @@ async def download_and_send_video(event, url):
         description = info_dict.get('description') if "instagram.com" in url.lower() else None
         if description and description.strip():
             for i in range(0, len(description), 4096):
-                await client.send_message(chat_id, f"Video tavsifi:\n\n{description[i:i+4096]}")
+                await client.send_message(chat_id, f"{description[i:i+4096]}\n\n "@Allsavervide0bot")
 
     except Exception as e:
         logging.error(f"Xatolik yuz berdi: {e}")
