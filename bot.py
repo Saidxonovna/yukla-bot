@@ -9,7 +9,7 @@ from telethon import TelegramClient, events, Button
 from telethon.tl.types import DocumentAttributeVideo
 from telethon.errors import MessageNotModifiedError
 
-# Log yozishni sozlash
+# Log yozishni sozlash (xatoliklarni kuzatish uchun)
 logging.basicConfig(format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s',
                     level=logging.INFO)
 
@@ -22,6 +22,7 @@ except (ValueError, TypeError):
     logging.critical("API_ID, API_HASH yoki BOT_TOKEN topilmadi yoki noto'g'ri formatda!")
     exit(1)
 
+# Fayl hajmi uchun cheklov
 MAX_FILE_SIZE_LIMIT = 1 * 1024 * 1024 * 1024  # 1 Gigabayt
 
 # Telethon klientini yaratish
@@ -29,7 +30,7 @@ client = TelegramClient('bot_session', API_ID, API_HASH)
 
 # --- YUKLASH SOZLAMALARI UCHUN ASOSIY LUG'AT ---
 BASE_YDL_OPTS = {
-    'format': 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    'format': 'best[ext=mp4][height<=720]/best[ext=mp4]/best',
     'outtmpl': '%(title)s - [%(id)s].%(ext)s',
     'noplaylist': True,
     'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}],
@@ -42,6 +43,7 @@ BASE_YDL_OPTS = {
 
 # --- YORDAMCHI FUNKSIYA ---
 async def safe_edit_message(message, text, **kwargs):
+    """Xabarni xavfsiz tahrirlaydi."""
     if not message or not hasattr(message, 'text') or message.text == text:
         return
     try:
@@ -51,7 +53,7 @@ async def safe_edit_message(message, text, **kwargs):
     except Exception as e:
         logging.warning(f"Xabarni tahrirlashda kutilmagan xatolik: {e}")
 
-# --- ASOSIY YUKLASH FUNKSIYASI (XATOLIK TUZATILGAN) ---
+# --- ASOSIY YUKLASH FUNKSIYASI ---
 async def download_and_send_video(event, url):
     chat_id = event.chat_id
     processing_message = None
@@ -67,25 +69,16 @@ async def download_and_send_video(event, url):
         return
 
     try:
-        # <<< IZOH: Asosiy thread'dagi joriy event loop'ni olamiz
         loop = asyncio.get_running_loop()
         last_update = 0
 
-        # <<< IZOH: progress_hook funksiyasi asosiy funksiya ichida e'lon qilinadi.
-        # Shunda u yuqoridagi 'loop' o'zgaruvchisidan bemalol foydalana oladi.
         def progress_hook(d):
             nonlocal last_update
             if d['status'] == 'downloading':
                 current_time = time.time()
                 if current_time - last_update > 3 and all(k in d for k in ('_percent_str', '_speed_str', '_eta_str')):
                     progress_text = f"📥 **Serverga yuklanmoqda...**\n`{d['_percent_str']} | {d['_speed_str']} | {d['_eta_str']}`"
-                    
-                    # <<< IZOH: Xatolik berayotgan qator. Endi u to'g'ri ishlaydi.
-                    # Oldindan olingan 'loop' o'zgaruvchisi ishlatiladi.
-                    asyncio.run_coroutine_threadsafe(
-                        safe_edit_message(processing_message, progress_text),
-                        loop
-                    )
+                    asyncio.run_coroutine_threadsafe(safe_edit_message(processing_message, progress_text), loop)
                     last_update = current_time
 
         local_ydl_opts = BASE_YDL_OPTS.copy()
@@ -118,6 +111,19 @@ async def download_and_send_video(event, url):
             chat_id, file_path, caption=final_caption, progress_callback=upload_progress,
             attributes=[DocumentAttributeVideo(duration=duration, w=width, h=height, supports_streaming=True)]
         )
+        
+        # <<< MUHIM: Video tavsifini (opisaniyasini) olib, yuborish qismi ---
+        description = info_dict.get('description')
+        if description and description.strip():
+            logging.info(f"Tavsif topildi. Uzunligi: {len(description)} belgi. Yuborilmoqda...")
+            # Tavsif juda uzun bo'lsa, uni 4096 belgidan bo'lib yuborish
+            for i in range(0, len(description), 4096):
+                chunk = description[i:i+4096]
+                await client.send_message(chat_id, f"**📝 Video tavsifi:**\n\n{chunk}")
+        else:
+            # Muammoni aniqlash uchun log yozamiz
+            logging.info(f"Bu video uchun tavsif topilmadi yoki u bo'sh. URL: {url}")
+        
         await processing_message.delete()
 
     except yt_dlp_utils.DownloadError as e:
@@ -134,14 +140,13 @@ async def download_and_send_video(event, url):
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
-# --- ASOSIY HANDLERLAR (O'zgarishsiz) ---
+# --- ASOSIY HANDLERLAR ---
 @client.on(events.NewMessage(pattern=re.compile(r'https?://\S+')))
 async def main_handler(event):
     url_match = re.search(r'https?://\S+', event.text)
     if not url_match: return
     url = url_match.group(0)
 
-    # Playlist'larni alohida ishlash
     if "list=" in url or "/playlist?" in url:
         playlist_msg = await event.reply("⏳ Playlist tahlil qilinmoqda...")
         try:
