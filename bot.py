@@ -3,7 +3,6 @@ import os
 import time
 import asyncio
 from yt_dlp import YoutubeDL
-from yt_dlp import PinterestDL
 from telethon import TelegramClient, events
 
 # Log yozishni sozlash
