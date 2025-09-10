@@ -1,3 +1,4 @@
+𝑺𝒂𝒊𝒅𝒙𝒐𝒏𝒐𝒗𝒏𝒂 ♡, [10.09.2025 23:13]
 import logging
 import os
 import time
@@ -83,7 +84,7 @@ async def download_and_send_video(event, url):
                     percentage = d['_percent_str']
                     speed = d['_speed_str']
                     eta = d['_eta_str']
-                    progress_text = f"📥**Yuklanmoqda...**\n\n`{percentage} | {speed} | {eta}`"
+                    progress_text = f"📥Yuklanmoqda...\n\n{percentage} | {speed} | {eta}"
                     asyncio.run_coroutine_threadsafe(
                         safe_edit_message(processing_message, progress_text),
                         asyncio.get_event_loop()
@@ -103,15 +104,14 @@ async def download_and_send_video(event, url):
             loop = asyncio.get_event_loop()
             info_dict = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
             file_path = ydl.prepare_filename(info_dict)
-
-        if not file_path or not os.path.exists(file_path):
+          if not file_path or not os.path.exists(file_path):
             await safe_edit_message(processing_message, "❌ Kechirasiz, videoni yuklab bo'lmadi.")
             return
 
         # --- TELEGRAM'GA YUBORISH JARAYONINI KO'RSATISH ---
         async def upload_progress(current, total):
             percentage = current * 100 / total
-            await safe_edit_message(processing_message, f"✅**Yuborilmoqda...**\n`{percentage:.1f}%`")
+            await safe_edit_message(processing_message, f"✅Yuborilmoqda...\n{percentage:.1f}%")
 
         await client.send_file(
             chat_id, file_path, caption="Yordamim tekkanidan xursandman, @Allsavervide0bot!",
@@ -122,7 +122,7 @@ async def download_and_send_video(event, url):
         description = info_dict.get('description') if "instagram.com" in url.lower() else None
         if description and description.strip():
             for i in range(0, len(description), 4096):
-                await client.send_message(chat_id, f"**Video tavsifi:**\n\n{description[i:i+4096]}")
+                await client.send_message(chat_id, f"Video tavsifi:\n\n{description[i:i+4096]}")
 
     except Exception as e:
         logging.error(f"Xatolik yuz berdi: {e}")
@@ -132,7 +132,7 @@ async def download_and_send_video(event, url):
         elif "Sign in to confirm" in error_text or "Login required" in error_text:
             error_text = "Cookie'lar eskirgan yoki noto'g'ri. Iltimos, ularni yangilang."
 
-        error_full_text = f"❌ Kechirasiz, xatolik yuz berdi.\n\n`{error_text}`"
+        error_full_text = f"❌ Kechirasiz, xatolik yuz berdi.\n\n{error_text}"
         await safe_edit_message(processing_message, error_full_text)
     finally:
         if file_path and os.path.exists(file_path):
@@ -160,7 +160,7 @@ async def main_handler(event):
                 buttons.append([Button.inline(button_text, data=f"dl_{video_id}")])
             if not buttons:
                 await playlist_msg.edit("❌ Playlist'dan videolarni olib bo'lmadi."); return
-            await playlist_msg.edit(f"**'{info_dict.get('title')}'** playlisti topildi.\n\nQuyidagi videolardan birini tanlang (birinchi {len(entries)} tasi):", buttons=buttons)
+            await playlist_msg.edit(f"'{info_dict.get('title')}' playlisti topildi.\n\nQuyidagi videolardan birini tanlang (birinchi {len(entries)} tasi):", buttons=buttons)
         except Exception as e:
             await playlist_msg.edit(f"❌ Playlist'ni o'qishda xatolik: {e}")
         finally:
@@ -190,5 +190,5 @@ async def main():
     print("Bot muvaffaqiyatli ishga tushdi...")
     await client.run_until_disconnected()
 
-if __name__ == '__main__':
+if name == 'main':
     asyncio.run(main())
