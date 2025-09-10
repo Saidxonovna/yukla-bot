@@ -71,12 +71,12 @@ async def hybrid_download(event, url):
     # --- 2-QADAM: Cobalt API orqali videoni o'zini olish ---
     try:
         await safe_edit_message(processing_message, "🌎 Yuklash servisidan video so'ralmoqda...")
-        
+
         # <<< MUHIM: Bu ishonchli va rasmiy Cobalt API manzili
         api_url = "https://api.cobalt.tools/api/json"
-        
+
         payload = {"url": url, "vQuality": "720"}
-        
+
         async with httpx.AsyncClient(timeout=90) as client_http:
             response = await client_http.post(api_url, json=payload, headers={"Accept": "application/json"})
             response.raise_for_status()
@@ -87,7 +87,7 @@ async def hybrid_download(event, url):
             # Ma'lumotlar yt-dlp'dan muvaffaqiyatli olingan bo'lsa, o'shani ishlatamiz
             video_title = info_dict.get('title', 'Yuklab olingan video') if info_dict else "Yuklab olingan video"
             description = info_dict.get('description') if info_dict else None
-            
+
             await safe_edit_message(processing_message, "✅ Video topildi, Telegram'ga yuborilmoqda...")
 
             await client.send_file(
@@ -102,7 +102,7 @@ async def hybrid_download(event, url):
                 for i in range(0, len(description), 4096):
                     chunk = description[i:i+4096]
                     await client.send_message(chat_id, f"**📝 Video tavsifi:**\n\n{chunk}")
-            
+
             await processing_message.delete()
         else:
             error_text = data.get('text', 'Noma\'lum xato. Bu havolani yuklab bo\'lmaydi.')
@@ -123,7 +123,7 @@ async def main_handler(event):
     url_match = re.search(r'https?://\S+', event.text)
     if not url_match: return
     url = url_match.group(0)
-    
+
     if "list=" in url or "/playlist?" in url:
         await event.reply("Playlist'larni yuklash qo'llab-quvvatlanmaydi. Iltimos, alohida video havolasini yuboring.")
         return
