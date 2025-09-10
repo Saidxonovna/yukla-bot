@@ -49,7 +49,7 @@ async def download_and_send_video(event, url):
             await client.edit_message(processing_message, "❌ Kechirasiz, videoni yuklab bo'lmadi.")
             return
 
-        await client.edit_message(processing_message, "✅ Video yuklandi! Endi Telegramga yuborilmoqda...")
+        await client.edit_message(processing_message, "✅ Yuborilmoqda...")
         
         # === INSTAGRAM OPISANIYASINI OLISH UCHUN QO'SHILGAN YANGI QISM ===
         description = None
@@ -60,7 +60,7 @@ async def download_and_send_video(event, url):
         await client.send_file(
             chat_id,
             file_path,
-            caption="Marhamat, videongiz tayyor!"
+            caption="Video @Allsavervide0bot tomonidan yuklandi !"
         )
         await client.delete_messages(chat_id, processing_message)
 
@@ -68,7 +68,7 @@ async def download_and_send_video(event, url):
         if description and description.strip():
             # Matn uzun bo'lsa, Telegram chegarasiga moslab bo'lib yuborish
             for i in range(0, len(description), 4096):
-                await client.send_message(chat_id, f"{description[i:i+4096]}n\n\**@Allsavervide0bot**")
+                await client.send_message(chat_id, f"{description[i:i+4096]}**Video @Allsavervide0bot tomonidan yuklandi!**"n\n\)
         # =================================================================
 
     except Exception as e:
@@ -89,7 +89,7 @@ async def main_handler(event):
     
     if "list=" in url or "/playlist?" in url:
         # Playlist logikasi (o'zgarishsiz)
-        await event.reply("⏳ Playlist aniqlandi. Videolar ro'yxati olinmoqda, kuting...")
+        await event.reply("⏳ Playlist...")
         # ... (qolgan playlist kodi avvalgidek)
         try:
             ydl_opts = {'extract_flat': True, 'noplaylist': False, 'playlistend': 10, 'cookiefile': 'cookies.txt'}
