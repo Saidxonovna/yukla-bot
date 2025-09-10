@@ -1,4 +1,2 @@
 telethon
 httpx
-yt-dlp
-
