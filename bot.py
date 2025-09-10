@@ -64,7 +64,7 @@ async def download_and_send_video(event, url):
             processing_message = await event.edit("📥Yuklanmoqda...")
         else:
             # Agar bu yangi havola bo'lsa, unga javob qaytaramiz
-            processing_message = await event.reply("📥Yuklanmoqda...")
+            processing_message = await event.reply("📥 Yuklanmoqda...")
 
         # Havola uchun mos cookie faylini olish
         cookie_file = get_cookie_for_url(url)
@@ -81,7 +81,7 @@ async def download_and_send_video(event, url):
         }
 
         with YoutubeDL(ydl_opts) as ydl:
-            await client.edit_message(processing_message, "📥Yuklanmoqda...")
+            await client.edit_message(processing_message, "📥  Yuklanmoqda...")
             loop = asyncio.get_event_loop()
             info_dict = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
             file_path = ydl.prepare_filename(info_dict)
@@ -90,7 +90,7 @@ async def download_and_send_video(event, url):
             await client.edit_message(processing_message, "❌ Kechirasiz, videoni yuklab bo'lmadi.")
             return
 
-        await client.edit_message(processing_message, "📥Yuklanmoqda...")
+        await client.edit_message(processing_message, " 📥Yuklanmoqda...")
         
         description = info_dict.get('description') if "instagram.com" in url.lower() else None
 
