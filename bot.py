@@ -18,16 +18,19 @@ BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 client = TelegramClient('bot_session', API_ID, API_HASH)
 
 # --- YUKLASH FUNKSIYASI ( қайта фойдаланиш учун алоҳида қилинди) ---
+# --- YUKLASH FUNKSIYASI ---
 async def download_and_send_video(event, url):
     chat_id = event.chat_id
     processing_message = await client.send_message(chat_id, "⏳ Havola qabul qilindi. Yuklash jarayoni boshlanmoqda...")
 
     try:
+        # ydl_opts ichida 'postprocessor_args' borligini tekshiring
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': '%(title)s - %(id)s.%(ext)s', # Fayl nomiga ID qo'shildi
-            'noplaylist': True, # Bu yerda har doim bitta video yuklanadi
+            'outtmpl': '%(title)s - %(id)s.%(ext)s',
+            'noplaylist': True,
             'cookiefile': 'cookies.txt',
+            # --- MANA SHU QATOR "00:00" MUAMMOSINI HAL QILADI ---
             'postprocessor_args': ['-movflags', '+faststart']
         }
 
@@ -37,6 +40,7 @@ async def download_and_send_video(event, url):
             info_dict = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
             file_path = ydl.prepare_filename(info_dict)
 
+        # ... (funksiyaning qolgan qismi o'zgarishsiz qoladi) ...
         if not file_path or not os.path.exists(file_path):
             await client.edit_message(processing_message, "❌ Kechirasiz, videoni yuklab bo'lmadi.")
             return
