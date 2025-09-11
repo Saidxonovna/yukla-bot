@@ -336,3 +336,51 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot o'chirildi.")
+# ... yuqoridagi kodlar o'zgarmasdan qoladi ...
+
+# Global foydalanuvchi lock-larini saqlash uchun lug'at
+user_locks = {}
+lock_timeout = 300 # 5 daqiqa
+
+# ... boshqa yordamchi funksiyalar va handlerlar ...
+
+# --- ASOSIY QAYTA ISHLOVCHI: XABAR KELGANDA ISHLAYDI ---
+@client.on(events.NewMessage(pattern=r'https?://\S+'))
+async def main_handler(event):
+    user_id = event.sender_id
+    url = event.text.strip()
+    
+    # Foydalanuvchi uchun Lock ob'ektini yaratish yoki mavjudini olish
+    if user_id not in user_locks or user_locks[user_id]['lock'].locked():
+        # Oxirgi so'rovdan beri 5 daqiqa o'tgan bo'lsa, lockni bo'shatish
+        if user_id in user_locks and time.time() - user_locks[user_id]['timestamp'] > lock_timeout:
+            user_locks[user_id]['lock'].release()
+            del user_locks[user_id]
+        else:
+            await event.reply("⚠️ Sizning oldingi so'rovingiz hali tugamadi. Iltimos, uning yakunlanishini kuting.")
+            return
+
+    # Lockni band qilish
+    user_locks[user_id] = {'lock': asyncio.Lock(), 'timestamp': time.time()}
+    await user_locks[user_id]['lock'].acquire()
+
+    try:
+        # URLni tekshirish
+        if not YOUTUBE_RE.match(url) and not INSTAGRAM_RE.match(url):
+            return await event.reply("Kechirasiz, men faqat YouTube va Instagram havolalarini yuklab olaman.")
+            
+        # ... qolgan kodlar (playlist va video logikasi) ...
+        
+        # Original koddagi kabi, video hajmi yoki turiga qarab navbatga qo'shish
+        # ...
+        
+    except Exception as e:
+        logging.error(f"Main handlerda xatolik: {e}", exc_info=True)
+        await event.reply("❌ Havolani tahlil qilishda xatolik yuz berdi. Iltimos, boshqa havolani urinib ko'ring.")
+    finally:
+        # Jarayon tugagandan so'ng, Lockni bo'shatish
+        if user_id in user_locks and user_locks[user_id]['lock'].locked():
+            user_locks[user_id]['lock'].release()
+            # Lockni keyinroq tozalash uchun qoldirish mumkin, hozircha o'chiramiz
+            # del user_locks[user_id]
+
