@@ -181,6 +181,7 @@ async def start_handler(event):
 async def main_handler(event):
     url = event.text.strip()
     
+    # URLni tekshirish
     if not YOUTUBE_RE.match(url) and not INSTAGRAM_RE.match(url):
         return await event.reply("Kechirasiz, men faqat YouTube va Instagram havolalarini yuklab olaman.")
         
@@ -224,8 +225,23 @@ async def main_handler(event):
                 buttons=buttons,
                 parse_mode='markdown'
             )
-        else:
-            # Oddiy video havolasi
+        # --- BU YERDA O'ZGARISH AMALGA OSHIRILDI ---
+        # Instagram havolasini tekshirish
+        elif INSTAGRAM_RE.match(url):
+            # Instagram uchun standart sozlamalar
+            ydl_opts = {
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
+                'outtmpl': 'downloads/%(title)s.%(ext)s',
+                'noplaylist': True,
+                'postprocessor_args': ['-movflags', '+faststart'],
+                'retries': 5, 'socket_timeout': 30,
+                'max_filesize': 1024 * 1024 * 1024,
+            }
+            # To'g'ridan-to'g'ri navbatga qo'shish
+            await download_queue.put((event, url, ydl_opts))
+            await event.reply("✅ So'rovingiz qabul qilindi va navbatga qo'yildi.")
+            
+        else: # Qolgan barcha holatlar, ya'ni oddiy YouTube videolari uchun
             unique_id = str(uuid.uuid4())
             temp_urls[unique_id] = url
             
