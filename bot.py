@@ -16,7 +16,7 @@ import logging
 import uuid
 import time
 
-from telethon import TelegramClient, events, Button
+from telethon import TelegramClient, events
 from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeVideo
 from telethon.errors import MessageNotModifiedError
 from yt_dlp import YoutubeDL
@@ -35,7 +35,7 @@ try:
     API_HASH = os.environ.get("API_HASH")
     BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
     # Cookie fayllar yosh cheklovi bo'lgan yoki maxfiy videolarni yuklash uchun kerak
-    YOUTUBE_COOKIE = os.environ.get("YOUTUBE_COOKIE")
+    TIKTOK_COOKIE = os.environ.get("TIKTOK_COOKIE")
     INSTAGRAM_COOKIE = os.environ.get("INSTAGRAM_COOKIE")
     BOT_USERNAME = os.environ.get("BOT_USERNAME", "@Allsavervide0bot")
 except (ValueError, TypeError):
@@ -48,12 +48,17 @@ client = TelegramClient('bot_session', API_ID, API_HASH)
 # --- Global o'zgaruvchilar ---
 # Yuklab olish uchun navbat (bir vaqtda bir nechta so'rovni boshqarish uchun)
 download_queue = asyncio.Queue()
-# Sifat tanlash tugmasi bosilguncha URLni vaqtincha saqlash uchun
-temp_urls = {}
 
 # --- Qo'llab-quvvatlanadigan URL manzillari uchun Regex (regular expressions) ---
-YOUTUBE_RE = re.compile(r'https?://(?:www\.)?(?:youtu\.be/|youtube\.com/(?:watch\?v=|embed/|shorts/|playlist\?list=)).*')
-INSTAGRAM_RE = re.compile(r'https?://(?:www\.)?instagram\.com/(?:p|reel|tv|stories)/[a-zA-Z0-9_-]+')
+SUPPORTED_URL_RE = re.compile(
+    r'https?://(?:www\.)?(?:'
+    r'instagram\.com/(?:p|reel|tv|stories)/[a-zA-Z0-9_-]+'
+    r'|'
+    r'(?:vm\.)?tiktok\.com/.*'
+    r'|'
+    r'(?:pinterest\.com|pin\.it)/.*'
+    r')'
+)
 
 
 # --- YORDAMCHI FUNKSIYALAR ---
@@ -67,13 +72,12 @@ def get_cookie_for_url(url):
     cookie_data = None
     lower_url = url.lower()
 
-    if 'youtube.com' in lower_url or 'youtu.be' in lower_url:
-        cookie_data = YOUTUBE_COOKIE
-        # Har safar unikal fayl nomi yaratiladi
-        cookie_file_path = f'youtube_cookies_{uuid.uuid4()}.txt'
-    elif 'instagram.com' in lower_url:
+    if 'instagram.com' in lower_url:
         cookie_data = INSTAGRAM_COOKIE
         cookie_file_path = f'instagram_cookies_{uuid.uuid4()}.txt'
+    elif 'tiktok.com' in lower_url:
+        cookie_data = TIKTOK_COOKIE
+        cookie_file_path = f'tiktok_cookies_{uuid.uuid4()}.txt'
     else:
         return None
 
@@ -122,12 +126,7 @@ async def process_and_send(event, url, ydl_opts, initial_message=None):
 
     try:
         # Jarayon boshlanganini foydalanuvchiga bildirish
-        if isinstance(event, events.CallbackQuery.Event):
-            # Agar tugma bosilgan bo'lsa, o'sha tugma xabarini tahrirlaymiz
-            processing_message = await event.edit("⏳ Ma'lumotlar olinmoqda...")
-        else:
-            # Agar yangi xabar kelgan bo'lsa, unga javob qaytaramiz
-            processing_message = await event.reply("⏳ Ma'lumotlar olinmoqda...")
+        processing_message = await event.reply("⏳ Ma'lumotlar olinmoqda...")
 
         # Kerakli cookie faylini olish
         cookie_file = get_cookie_for_url(url)
@@ -250,37 +249,17 @@ async def worker():
 async def start_handler(event):
     """Botga /start komandasi yuborilganda javob beradi."""
     await event.reply(
-        "Assalomu alaykum! Men YouTube va Instagram'dan video hamda audio yuklab bera olaman.\n\n"
+        "Assalomu alaykum! Men Instagram, TikTok va Pinterest'dan video yuklab bera olaman.\n\n"
         "Shunchaki, kerakli video havolasini menga yuboring."
     )
 
-@client.on(events.NewMessage(pattern=YOUTUBE_RE))
-async def youtube_handler(event):
-    """YouTube havolasi yuborilganda ishlaydi."""
-    # Hozircha playlistlarni yuklash o'chirilgan
-    if 'list=' in event.text or '/playlist?' in event.text:
-        return await event.reply("🚧 Kechirasiz, butun bir playlist'ni yuklash funksiyasi vaqtincha mavjud emas.")
-    
-    # Har bir so'rov uchun unikal ID yaratamiz. Bu bir nechta foydalanuvchi
-    # bir vaqtda tugma bosganda adashib ketmaslik uchun kerak.
-    unique_id = str(uuid.uuid4())
-    temp_urls[unique_id] = event.text.strip()
-    
-    # Foydalanuvchiga sifat tanlash imkoniyatini beruvchi tugmalar
-    buttons = [
-        [Button.inline("🎥 Video (720p)", data=f"quality_720_{unique_id}")],
-        [Button.inline("🎥 Video (360p)", data=f"quality_360_{unique_id}")],
-        [Button.inline("🎵 Faqat audio (MP3)", data=f"quality_audio_{unique_id}")]
-    ]
-    await event.reply("Yuklab olish uchun kerakli formatni tanlang:", buttons=buttons)
-
-@client.on(events.NewMessage(pattern=INSTAGRAM_RE))
-async def instagram_handler(event):
-    """Instagram havolasi yuborilganda ishlaydi."""
+@client.on(events.NewMessage(pattern=SUPPORTED_URL_RE))
+async def general_url_handler(event):
+    """Barcha qo'llab-quvvatlanadigan havolalar uchun ishlaydi."""
     # Foydalanuvchiga uning so'rovi qabul qilinganini bildiramiz
     initial_message = await event.reply("✅ So'rovingiz qabul qilindi va navbatga qo'yildi...")
     
-    # Instagram uchun standart sozlamalar
+    # Standart sozlamalar
     ydl_opts = {
         'format': 'best',
         'noplaylist': True,
@@ -289,37 +268,6 @@ async def instagram_handler(event):
     # Vazifani navbatga qo'yamiz. `initial_message` ham qo'shiladi,
     # chunki u jarayon oxirida o'chirilishi kerak.
     await download_queue.put((event, event.text.strip(), ydl_opts, initial_message))
-
-@client.on(events.CallbackQuery(pattern=b'quality_'))
-async def quality_handler(event):
-    """Sifat tanlash tugmalari bosilganda ishlaydi."""
-    # Foydalanuvchiga uning tanlovi qabul qilinganini bildiramiz
-    await event.answer("So'rovingiz qabul qilindi...")
-    
-    data = event.data.decode('utf-8').split('_', 2)
-    quality, unique_id = data[1], data[2]
-    
-    # Vaqtinchalik saqlangan URLni ID orqali olamiz
-    url = temp_urls.pop(unique_id, None)
-
-    if not url:
-        return await event.edit("❌ Kechirasiz, bu so'rovning vaqti tugagan. Iltimos, havolani qayta yuboring.")
-
-    # Tanlangan sifatga qarab yt-dlp sozlamalarini tayyorlaymiz
-    ydl_opts = {'noplaylist': True, 'retries': 5}
-    if quality == "audio":
-        ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3'
-        }]
-    else: # Video uchun
-        # Bu yt-dlp uchun maxsus format: belgilangan o'lchamdan oshmaydigan eng yaxshi videoni
-        # va eng yaxshi audioni olib birlashtirishga harakat qiladi. Bu eng ishonchli usul.
-        ydl_opts['format'] = f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<={quality}]'
-        
-    # Vazifani navbatga qo'yamiz
-    await download_queue.put((event, url, ydl_opts, None))
 
 
 async def main():
@@ -342,3 +290,4 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("Bot foydalanuvchi tomonidan to'xtatildi.")
+
