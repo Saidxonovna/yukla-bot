@@ -148,8 +148,24 @@ async def process_and_send(event, url, ydl_opts, initial_message=None):
         if 'entries' in info_dict and info_dict['entries']:
             info_dict = info_dict['entries'][0]
 
-        # yt-dlp format tanlashdan so'ng to'g'ridan-to'g'ri havolani beradi
-        direct_url = info_dict.get('url')
+        # --- Yaxshilangan URL topish mantig'i ---
+        direct_url = None
+        formats = info_dict.get('formats', [info_dict])
+        
+        # Eng sifatli videoni topish (audio-only formatlarni hisobga olmagan holda)
+        video_formats = [
+            f for f in formats 
+            if f.get('vcodec') != 'none' and f.get('url')
+        ]
+        
+        if video_formats:
+            # Sifat bo'yicha saralash (eng balandi birinchi)
+            best_format = sorted(
+                video_formats, 
+                key=lambda f: (f.get('height') or 0, f.get('tbr') or 0), 
+                reverse=True
+            )[0]
+            direct_url = best_format.get('url')
 
         if not direct_url:
             log.error(f"To'g'ridan-to'g'ri URL topilmadi. Info_dict: {info_dict}")
