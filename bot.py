@@ -7,28 +7,36 @@ import time
 from functools import lru_cache
 
 from telethon import TelegramClient, events, Button
-from telethon.tl.types import DocumentAttributeFilename
+from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeVideo
 from telethon.errors import MessageNotModifiedError
 from yt_dlp import YoutubeDL
 
-# Logger sozlamalari
-logging.basicConfig(format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s',
-                    level=logging.INFO)
+# Logger sozlamalari (xatoliklarni oson topish uchun)
+logging.basicConfig(
+    format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s',
+    level=logging.INFO
+)
+log = logging.getLogger(__name__)
 
-# --- Railway'ning "Variables" bo'limidan olinadigan ma'lumotlar ---
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-YOUTUBE_COOKIE = os.environ.get("YOUTUBE_COOKIE")
-INSTAGRAM_COOKIE = os.environ.get("INSTAGRAM_COOKIE")
+# --- O'zgaruvchilarni muhitdan (environment variables) o'qish ---
+# Bu ma'lumotlarni Railway'ning "Variables" bo'limiga joylashtirasiz
+try:
+    API_ID = int(os.environ.get("API_ID"))
+    API_HASH = os.environ.get("API_HASH")
+    BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+    YOUTUBE_COOKIE = os.environ.get("YOUTUBE_COOKIE")
+    INSTAGRAM_COOKIE = os.environ.get("INSTAGRAM_COOKIE")
+    BOT_USERNAME = os.environ.get("BOT_USERNAME", "@Allsavervide0bot") # Bot username'ini ham o'zgaruvchi qiling
+except (ValueError, TypeError):
+    log.critical("API_ID, API_HASH yoki TELEGRAM_TOKEN muhit o'zgaruvchilarida topilmadi yoki noto'g'ri formatda.")
+    exit(1)
 
 # Telethon klientini yaratish
 client = TelegramClient('bot_session', API_ID, API_HASH)
 
 # Global navbat va vaqtinchalik URL saqlash joyi
 download_queue = asyncio.Queue()
-temp_urls = {}
-playlist_info_cache = {}
+temp_urls = {} # Foydalanuvchi tugmani bosguncha URL'ni saqlab turish uchun
 
 # Qo'llab-quvvatlanadigan URLlar uchun regex
 YOUTUBE_RE = re.compile(r'https?://(?:www\.)?(?:youtu\.be/|youtube\.com/(?:watch\?v=|embed/|shorts/|playlist\?list=)).*')
@@ -38,22 +46,27 @@ INSTAGRAM_RE = re.compile(r'https?://(?:www\.)?instagram\.com/(?:p|reel|tv)/[a-z
 
 @lru_cache(maxsize=128)
 def get_cookie_for_url(url):
-    """Havolani tahlil qilib, mos cookie faylini yaratadi va uning nomini qaytaradi."""
-    cookie_file_path = None
+    """Havolaga mos cookie faylini vaqtincha yaratadi va uning nomini qaytaradi."""
     cookie_data = None
     lower_url = url.lower()
 
     if 'youtube.com' in lower_url or 'youtu.be' in lower_url:
         cookie_data = YOUTUBE_COOKIE
-        cookie_file_path = 'youtube_cookies.txt'
+        cookie_file_path = f'youtube_cookies_{uuid.uuid4()}.txt'
     elif 'instagram.com' in lower_url:
         cookie_data = INSTAGRAM_COOKIE
-        cookie_file_path = 'instagram_cookies.txt'
+        cookie_file_path = f'instagram_cookies_{uuid.uuid4()}.txt'
+    else:
+        return None
 
-    if cookie_data and cookie_file_path:
-        with open(cookie_file_path, 'w', encoding='utf-8') as f:
-            f.write(cookie_data)
-        return cookie_file_path
+    if cookie_data:
+        try:
+            with open(cookie_file_path, 'w', encoding='utf-8') as f:
+                f.write(cookie_data)
+            return cookie_file_path
+        except IOError as e:
+            log.error(f"Cookie faylini yozishda xatolik: {e}")
+            return None
     return None
 
 async def safe_edit_message(message, text, **kwargs):
@@ -65,91 +78,92 @@ async def safe_edit_message(message, text, **kwargs):
     except MessageNotModifiedError:
         pass
     except Exception as e:
-        logging.warning(f"Xabarni tahrirlashda kutilmagan xatolik: {e}")
+        log.warning(f"Xabarni tahrirlashda kutilmagan xatolik: {e}")
 
-async def download_and_send(event, url, ydl_opts):
-    """Videoni yuklaydi va foydalanuvchiga yuboradi."""
+# ### ASOSIY O'ZGARISH QILINGAN FUNKSIYA ###
+async def process_and_send(event, url, ydl_opts):
+    """
+    Videoni serverga YUKLAMASDAN, to'g'ridan-to'g'ri havolasini olib,
+    Telegram orqali yuboradi.
+    """
     chat_id = event.chat_id
     processing_message = None
     cookie_file = None
-    file_path = None
     loop = asyncio.get_running_loop()
 
     try:
         if isinstance(event, events.CallbackQuery.Event):
-            processing_message = await event.edit("⏳ Yuklab olish jarayoni boshlanmoqda...")
+            processing_message = await event.edit("⏳ Ma'lumotlar olinmoqda...")
         else:
-            processing_message = await event.reply("⏳ Yuklab olish jarayoni boshlanmoqda...")
-        
-        # Cookie sozlamalari
+            processing_message = await event.reply("⏳ Ma'lumotlar olinmoqda...")
+
         cookie_file = get_cookie_for_url(url)
-        if cookie_file and os.path.exists(cookie_file):
+        if cookie_file:
             ydl_opts['cookiefile'] = cookie_file
-        
-        # Yuklash jarayonini kuzatish
-        last_update = 0
-        def progress_hook(d):
-            nonlocal last_update
-            if d['status'] == 'downloading':
-                current_time = time.time()
-                if current_time - last_update > 3:
-                    percentage = d['_percent_str']
-                    speed = d['_speed_str']
-                    eta = d['_eta_str']
-                    progress_text = f"📥 Yuklanmoqda...\n\n{percentage} | {speed} | {eta}"
-                    asyncio.run_coroutine_threadsafe(safe_edit_message(processing_message, progress_text), loop)
-                    last_update = current_time
 
-        ydl_opts['progress_hooks'] = [progress_hook]
-
+        # 1. Faqat ma'lumot olish, YUKLAMASLIK (download=False)
         with YoutubeDL(ydl_opts) as ydl:
-            info_dict = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
-            file_path = ydl.prepare_filename(info_dict)
-            
-            if not file_path or not os.path.exists(file_path):
-                await safe_edit_message(processing_message, "❌ Kechirasiz, videoni yuklab bo'lmadi.")
-                return
+            info_dict = await loop.run_in_executor(
+                None, lambda: ydl.extract_info(url, download=False)
+            )
 
-        await safe_edit_message(processing_message, "✅ Yuklab olindi. Endi videoni yuboraman...")
-        
-        # Sarlavha (caption) yaratish
+        # 2. To'g'ridan-to'g'ri havolani, sarlavha va boshqa ma'lumotlarni olish
+        direct_url = info_dict.get('url')
+        if not direct_url:
+            return await safe_edit_message(processing_message, "❌ Kechirasiz, video uchun yuklab olish havolasi topilmadi.")
+
         title = info_dict.get('title', 'Nomsiz video')
+        thumbnail_url = info_dict.get('thumbnail')
+        duration = info_dict.get('duration', 0)
         uploader = info_dict.get('uploader', 'Noma\'lum manba')
-        caption_text = f"**{title}**\n\nManba: {uploader}\n\nYuklab berildi: @Allsavervide0bot"
-        
-        # Yuborish jarayonini kuzatish
+        caption_text = f"**{title}**\n\nManba: {uploader}\n\nYuklab berdi: {BOT_USERNAME}"
+
+        # 3. Fayl yo'li o'rniga TO'G'RIDAN-TO'G'RI HAVOLANI yuborish
+        await safe_edit_message(processing_message, "✅ Havola topildi. Telegram'ga yuborilmoqda...")
+
+        # Telegramga yuborish jarayonini ko'rsatish
+        last_update_time = 0
         async def upload_progress(current, total):
-            percentage = current * 100 / total
-            await safe_edit_message(processing_message, f"✅ Yuborilmoqda...\n{percentage:.1f}%")
+            nonlocal last_update_time
+            current_time = time.time()
+            if current_time - last_update_time > 2:
+                percentage = current * 100 / total
+                await safe_edit_message(processing_message, f"✅ Yuborilmoqda... {percentage:.1f}%")
+                last_update_time = current_time
+
+        # Audio yoki video ekanligiga qarab atributlarni to'g'rilash
+        attributes = []
+        is_audio = 'FFmpegExtractAudio' in str(ydl_opts.get('postprocessors', ''))
+        if is_audio:
+            attributes.append(DocumentAttributeAudio(duration=duration, title=title, performer=uploader))
+        else:
+            attributes.append(DocumentAttributeVideo(
+                duration=duration,
+                w=info_dict.get('width', 0),
+                h=info_dict.get('height', 0),
+                supports_streaming=True
+            ))
 
         await client.send_file(
             chat_id,
-            file_path,
+            file=direct_url, # Eng asosiy o'zgarish shu yerda!
             caption=caption_text,
-            attributes=[DocumentAttributeFilename(file_path.split('/')[-1])],
             parse_mode='markdown',
+            attributes=attributes,
+            thumb=thumbnail_url,
             progress_callback=upload_progress
         )
         await client.delete_messages(chat_id, processing_message)
-        
-        description = info_dict.get('description') if "instagram.com" in url.lower() else None
-        if description and description.strip():
-            for i in range(0, len(description), 4096):
-                await client.send_message(chat_id, f"{description[i:i+4096]}\n\n @Allsavervide0bot")
 
     except Exception as e:
-        logging.error(f"Xatolik yuz berdi: {e}")
-        error_text = str(e)
-        if "File is larger than max-filesize" in error_text:
-            error_text = "Video hajmi 1 GB dan katta. Iltimos, kichikroq hajmdagi videoni tanlang."
-        elif "Sign in to confirm" in error_text or "Login required" in error_text:
-            error_text = "Cookie'lar eskirgan yoki noto'g'ri. Iltimos, ularni yangilang."
-
-        error_full_text = f"❌ Kechirasiz, xatolik yuz berdi.\n\n{error_text}"
-        await safe_edit_message(processing_message, error_full_text)
+        log.error(f"Jarayonda xatolik: {e}", exc_info=True)
+        error_text = str(e).split(';')[-1] # Xatoning asosiy qismini olish
+        if "confirm your age" in error_text:
+            error_text = "Bu video yosh chekloviga ega. Iltimos, YOUTUBE_COOKIE'ni sozlang."
+        elif "Private video" in error_text:
+            error_text = "Bu shaxsiy video. Uni yuklab bo'lmaydi."
+        await safe_edit_message(processing_message, f"❌ Kechirasiz, xatolik yuz berdi.\n\n`{error_text}`")
     finally:
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
         if cookie_file and os.path.exists(cookie_file):
             os.remove(cookie_file)
 
@@ -158,229 +172,87 @@ async def worker():
     while True:
         event, url, ydl_opts = await download_queue.get()
         try:
-            await download_and_send(event, url, ydl_opts)
+            await process_and_send(event, url, ydl_opts)
         except Exception as e:
-            logging.error(f"Worker'da xatolik: {e}")
-            try:
-                if isinstance(event, events.CallbackQuery.Event):
-                    await event.edit("❌ Yuklashda kutilmagan xatolik yuz berdi. Iltimos, qayta urinib ko'ring.")
-                else:
-                    await event.reply("❌ Yuklashda kutilmagan xatolik yuz berdi. Iltimos, qayta urinib ko'ring.")
-            except Exception as e_reply:
-                logging.error(f"Xabar yuborishda xatolik: {e_reply}")
+            log.error(f"Worker'da kutilmagan xatolik: {e}")
         finally:
             download_queue.task_done()
 
-# --- HANDLERLAR ---
+# --- HANDLERLAR (Xabarlarni qabul qiluvchilar) ---
 
 @client.on(events.NewMessage(pattern='/start'))
 async def start_handler(event):
-    await event.reply("Assalomu alaykum! Video yuklash uchun YouTube yoki Instagram havolasini yuboring.")
+    await event.reply(
+        "Assalomu alaykum! Video yuklash uchun YouTube yoki Instagram havolasini yuboring."
+    )
 
-@client.on(events.NewMessage(pattern=r'https?://\S+'))
-async def main_handler(event):
+@client.on(events.NewMessage(pattern=YOUTUBE_RE))
+async def youtube_handler(event):
     url = event.text.strip()
+    # Playlistni aniqlash
+    if 'list=' in url or '/playlist?' in url:
+        return await event.reply("🚧 Kechirasiz, playlistlarni yuklash vaqtincha to'xtatilgan.")
+        # Kelajakda playlistlar mantig'ini shu yerga qo'shish mumkin
     
-    # URLni tekshirish
-    if not YOUTUBE_RE.match(url) and not INSTAGRAM_RE.match(url):
-        return await event.reply("Kechirasiz, men faqat YouTube va Instagram havolalarini yuklab olaman.")
-        
-    try:
-        # Playlistni aniqlash
-        if 'list=' in url or '/playlist?' in url:
-            
-            # Playlist ma'lumotlarini keshdan olish
-            if url in playlist_info_cache and time.time() - playlist_info_cache[url]['timestamp'] < 3600:
-                info_dict = playlist_info_cache[url]['data']
-            else:
-                await event.reply("🔗 Bu playlist havolasi. Hozir videolarni yuklab olish uchun ro'yxat tuzaman, iltimos kuting...")
-                cookie_file = get_cookie_for_url(url)
-                ydl_opts = {'extract_flat': True, 'playlistend': 10, 'cookiefile': cookie_file}
-                with YoutubeDL(ydl_opts) as ydl:
-                    info_dict = ydl.extract_info(url, download=False)
-                if cookie_file and os.path.exists(cookie_file):
-                    os.remove(cookie_file)
-                playlist_info_cache[url] = {'data': info_dict, 'timestamp': time.time()}
+    # Oddiy YouTube videolari uchun
+    unique_id = str(uuid.uuid4())
+    temp_urls[unique_id] = url
+    
+    buttons = [
+        [Button.inline("🎥 Video (720p)", data=f"quality_720_{unique_id}")],
+        [Button.inline("🎥 Video (360p)", data=f"quality_360_{unique_id}")],
+        [Button.inline("🎵 Faqat audio (MP3)", data=f"quality_audio_{unique_id}")]
+    ]
+    await event.reply("Yuklab olish formatini tanlang:", buttons=buttons)
 
-            playlist_title = info_dict.get('title', 'Nomsiz playlist')
-            entries = info_dict.get('entries', [])
-            
-            if not entries:
-                return await event.reply("❌ Bu playlistda video topilmadi.")
+@client.on(events.NewMessage(pattern=INSTAGRAM_RE))
+async def instagram_handler(event):
+    url = event.text.strip()
+    await event.reply("✅ So'rovingiz qabul qilindi va navbatga qo'yildi.")
+    
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'noplaylist': True,
+        'retries': 5,
+    }
+    await download_queue.put((event, url, ydl_opts))
 
-            buttons = []
-            for i, entry in enumerate(entries):
-                if i >= 10: break
-                video_id = entry['id']
-                video_title = entry.get('title', f"Video {i+1}")
-                unique_id = str(uuid.uuid4())
-                temp_urls[unique_id] = f"https://www.youtube.com/watch?v={video_id}"
-                
-                button_text = video_title[:50] + '…' if len(video_title) > 50 else video_title
-                buttons.append([Button.inline(button_text, data=f"video_{unique_id}")])
-            
-            await client.send_message(
-                event.chat_id,
-                f"**{playlist_title}** playlistidan yuklamoqchi bo'lgan videoni tanlang (birinchi {len(buttons)} ta):\n\n",
-                buttons=buttons,
-                parse_mode='markdown'
-            )
-        # --- BU YERDA O'ZGARISH AMALGA OSHIRILDI ---
-        # Instagram havolasini tekshirish
-        elif INSTAGRAM_RE.match(url):
-            # Instagram uchun standart sozlamalar
-            ydl_opts = {
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
-                'outtmpl': 'downloads/%(title)s.%(ext)s',
-                'noplaylist': True,
-                'postprocessor_args': ['-movflags', '+faststart'],
-                'retries': 5, 'socket_timeout': 30,
-                'max_filesize': 1024 * 1024 * 1024,
-            }
-            # To'g'ridan-to'g'ri navbatga qo'shish
-            await download_queue.put((event, url, ydl_opts))
-            await event.reply("✅ So'rovingiz qabul qilindi va navbatga qo'yildi.")
-            
-        else: # Qolgan barcha holatlar, ya'ni oddiy YouTube videolari uchun
-            unique_id = str(uuid.uuid4())
-            temp_urls[unique_id] = url
-            
-            buttons = [
-                [Button.inline("🎥 Video (720p)", data=f"quality_720_{unique_id}")],
-                [Button.inline("🎥 Video (480p)", data=f"quality_480_{unique_id}")],
-                [Button.inline("🎵 Faqat audio (MP3)", data=f"quality_audio_{unique_id}")]
-            ]
-            await event.reply("Yuklab olish formatini tanlang:", buttons=buttons)
-
-    except Exception as e:
-        logging.error(f"Main handlerda xatolik: {e}", exc_info=True)
-        await event.reply("❌ Havolani tahlil qilishda xatolik yuz berdi. Iltimos, boshqa havolani urinib ko'ring.")
-
-# CallbackQuery uchun handler
+# Tugmalarni bosishni qabul qiluvchi handler
 @client.on(events.CallbackQuery(pattern=b'quality_'))
 async def quality_handler(event):
-    await event.answer("So'rovingiz qabul qilindi va navbatga qo'yildi.")
+    await event.answer("So'rovingiz qabul qilindi...")
     
     data = event.data.decode('utf-8').split('_', 2)
-    quality = data[1]
-    unique_id = data[2]
-    url = temp_urls.get(unique_id)
+    quality, unique_id = data[1], data[2]
+    url = temp_urls.pop(unique_id, None)
 
     if not url:
-        return await event.reply("❌ Kechirasiz, havolaning muddati tugadi yoki topilmadi. Iltimos, havolani qaytadan yuboring.")
-    
-    del temp_urls[unique_id]
+        return await event.edit("❌ Kechirasiz, bu so'rov muddati tugagan.")
 
-    ydl_opts = {
-        'outtmpl': 'downloads/%(title)s.%(ext)s',
-        'noplaylist': True,
-        'postprocessor_args': ['-movflags', '+faststart'],
-        'retries': 5, 'socket_timeout': 30,
-        'max_filesize': 1024 * 1024 * 1024,
-    }
-
+    ydl_opts = {'noplaylist': True, 'retries': 5}
     if quality == "audio":
         ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
-    else: # Masalan, '720' yoki '480'
-        ydl_opts['format'] = f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<={quality}]'
+        ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]
+    else:
+        ydl_opts['format'] = f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<={quality}]/best'
     
     await download_queue.put((event, url, ydl_opts))
-
-@client.on(events.CallbackQuery(pattern=b"video_"))
-async def playlist_video_handler(event):
-    await event.answer("So'rovingiz qabul qilindi va navbatga qo'yildi.")
-    
-    data = event.data.decode('utf-8').split('_', 1)
-    unique_id = data[1]
-    url = temp_urls.get(unique_id)
-    
-    if not url:
-        return await event.reply("❌ Kechirasiz, havolaning muddati tugadi yoki topilmadi. Iltimos, havolani qaytadan yuboring.")
-    
-    del temp_urls[unique_id]
-
-    ydl_opts = {
-        'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]',
-        'outtmpl': 'downloads/%(title)s.%(ext)s',
-        'noplaylist': True,
-        'postprocessor_args': ['-movflags', '+faststart'],
-        'retries': 5, 'socket_timeout': 30,
-        'max_filesize': 1024 * 1024 * 1024,
-    }
-    
-    await download_queue.put((event, url, ydl_opts))
-
 
 async def main():
     """Asosiy ishga tushirish funksiyasi."""
-    os.makedirs('downloads', exist_ok=True)
+    log.info("Bot ishga tushirilmoqda...")
     
-    print("Bot muvaffaqiyatli ishga tushdi...")
-    logging.info("Bot ishga tushdi.")
-    
-    # Worker'larni fon rejimida ishga tushirish
+    # Worker'larni (yuklovchilarni) fon rejimida ishga tushirish
     num_workers = 3
     for _ in range(num_workers):
         asyncio.create_task(worker())
     
     await client.start(bot_token=BOT_TOKEN)
+    log.info("Bot muvaffaqiyatli ishga tushdi va xabarlarni qabul qilmoqda.")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Bot o'chirildi.")
-# ... yuqoridagi kodlar o'zgarmasdan qoladi ...
-
-# Global foydalanuvchi lock-larini saqlash uchun lug'at
-user_locks = {}
-lock_timeout = 300 # 5 daqiqa
-
-# ... boshqa yordamchi funksiyalar va handlerlar ...
-
-# --- ASOSIY QAYTA ISHLOVCHI: XABAR KELGANDA ISHLAYDI ---
-@client.on(events.NewMessage(pattern=r'https?://\S+'))
-async def main_handler(event):
-    user_id = event.sender_id
-    url = event.text.strip()
-    
-    # Foydalanuvchi uchun Lock ob'ektini yaratish yoki mavjudini olish
-    if user_id not in user_locks or user_locks[user_id]['lock'].locked():
-        # Oxirgi so'rovdan beri 5 daqiqa o'tgan bo'lsa, lockni bo'shatish
-        if user_id in user_locks and time.time() - user_locks[user_id]['timestamp'] > lock_timeout:
-            user_locks[user_id]['lock'].release()
-            del user_locks[user_id]
-        else:
-            await event.reply("⚠️ Sizning oldingi so'rovingiz hali tugamadi. Iltimos, uning yakunlanishini kuting.")
-            return
-
-    # Lockni band qilish
-    user_locks[user_id] = {'lock': asyncio.Lock(), 'timestamp': time.time()}
-    await user_locks[user_id]['lock'].acquire()
-
-    try:
-        # URLni tekshirish
-        if not YOUTUBE_RE.match(url) and not INSTAGRAM_RE.match(url):
-            return await event.reply("Kechirasiz, men faqat YouTube va Instagram havolalarini yuklab olaman.")
-            
-        # ... qolgan kodlar (playlist va video logikasi) ...
-        
-        # Original koddagi kabi, video hajmi yoki turiga qarab navbatga qo'shish
-        # ...
-        
-    except Exception as e:
-        logging.error(f"Main handlerda xatolik: {e}", exc_info=True)
-        await event.reply("❌ Havolani tahlil qilishda xatolik yuz berdi. Iltimos, boshqa havolani urinib ko'ring.")
-    finally:
-        # Jarayon tugagandan so'ng, Lockni bo'shatish
-        if user_id in user_locks and user_locks[user_id]['lock'].locked():
-            user_locks[user_id]['lock'].release()
-            # Lockni keyinroq tozalash uchun qoldirish mumkin, hozircha o'chiramiz
-            # del user_locks[user_id]
-
+        log.info("Bot o'chirildi.")
