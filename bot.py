@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 
 """
-Telegram Bot for Downloading Videos from Instagram and Pinterest.
+Telegram Bot for Downloading Media from Instagram (Posts, Reels, Stories, Carousels) and Pinterest.
 
 This bot uses the Telethon library to interact with Telegram and yt-dlp
-to extract video information. It sends videos directly via URL to Telegram.
-For Instagram, it provides an option to fetch the post's description
-after the video is sent.
+to extract media information. It can handle single videos, images, and posts
+with multiple media items (carousels). It sends media directly via URL to
+Telegram for speed. For Instagram, it provides an option to fetch the post's
+description after the media is sent.
 """
 
 import os
@@ -17,7 +18,7 @@ import uuid
 import time
 
 from telethon import TelegramClient, events, Button
-from telethon.tl.types import DocumentAttributeVideo
+from telethon.tl.types import DocumentAttributeVideo, DocumentAttributePhoto
 from telethon.errors import MessageNotModifiedError, BotMethodInvalidError
 from yt_dlp import YoutubeDL
 
@@ -45,7 +46,7 @@ client = TelegramClient('bot_session', API_ID, API_HASH)
 
 # --- Global o'zgaruvchilar ---
 download_queue = asyncio.Queue()
-# Videoning matnini vaqtinchalik saqlash uchun kesh
+# Videoning matnini saqlash uchun kesh
 post_data_cache = {}
 
 
@@ -104,7 +105,7 @@ async def safe_edit_message(message, text, **kwargs):
 # ### ASOSIY YUKLASH FUNKSIYASI ###
 async def process_and_send(event, url, ydl_opts):
     """
-    Videoni to'g'ridan-to'g'ri havola orqali Telegramga yuboradi.
+    Media (video, rasm, karusel) ma'lumotlarini olib, to'g'ridan-to'g'ri havola orqali Telegramga yuboradi.
     """
     chat_id = event.chat_id
     processing_message = None
@@ -122,80 +123,98 @@ async def process_and_send(event, url, ydl_opts):
                 None, lambda: ydl.extract_info(url, download=False)
             )
 
-        if 'entries' in info_dict and info_dict['entries']:
-            info_dict = info_dict['entries'][0]
-
-        formats = info_dict.get('formats', [info_dict])
-        video_formats = [f for f in formats if f.get('vcodec') != 'none' and f.get('url')]
-        
-        if not video_formats:
-            await safe_edit_message(processing_message, "❌ Kechirasiz, bu havola uchun video formatlari topilmadi.")
+        media_items = info_dict.get('entries', [info_dict])
+        if not media_items:
+            await safe_edit_message(processing_message, "❌ Kechirasiz, bu havola uchun media fayllar topilmadi.")
             return
 
-        best_format = sorted(video_formats, key=lambda f: (f.get('height') or 0, f.get('tbr') or 0), reverse=True)[0]
-        direct_url = best_format.get('url')
+        if len(media_items) > 1:
+            await safe_edit_message(processing_message, f"✅ Postdagi {len(media_items)} ta media fayl topildi. Yuborilmoqda...")
+        else:
+            await safe_edit_message(processing_message, "✅ Media fayl topildi. Telegram'ga yuborilmoqda...")
 
-        if not direct_url:
-            await safe_edit_message(processing_message, "❌ Kechirasiz, video uchun yuklab olish havolasi topilmadi.")
-            return
+        last_sent_message = None
+        for i, item in enumerate(media_items):
+            is_video = item.get('vcodec') != 'none' and item.get('url')
+            # Rasm uchun eng yaxshi sifatdagi `url`ni topish
+            is_image = not is_video and (item.get('url') or item.get('thumbnails'))
+            
+            direct_url = None
+            attributes = None
+            
+            # Sarlavha faqat birinchi media faylga qo'shiladi
+            caption_text = ""
+            if i == 0:
+                title = item.get('title', 'Nomsiz media')
+                uploader = item.get('uploader', "Noma'lum manba")
+                caption_text = f"**{title}**\n\nManba: {uploader}\nYuklab berdi: {BOT_USERNAME}"
 
-        await safe_edit_message(processing_message, "✅ Havola topildi. Telegram'ga yuborilmoqda...")
+            if is_video:
+                formats = item.get('formats', [item])
+                video_formats = [f for f in formats if f.get('vcodec') != 'none' and f.get('url')]
+                if not video_formats:
+                    continue # Videoni o'tkazib yuborish
+                
+                best_format = sorted(video_formats, key=lambda f: (f.get('height') or 0, f.get('tbr') or 0), reverse=True)[0]
+                direct_url = best_format.get('url')
+                duration = int(item.get('duration', 0))
+                attributes = [DocumentAttributeVideo(
+                    duration=duration, w=best_format.get('width', 0), h=best_format.get('height', 0),
+                    supports_streaming=True
+                )]
 
-        title = info_dict.get('title', 'Nomsiz video')
-        uploader = info_dict.get('uploader', "Noma'lum manba")
-        caption_text = f"**{title}**\n\nManba: {uploader}\nYuklab berdi: {BOT_USERNAME}"
+            elif is_image:
+                # Rasmlar uchun to'g'ridan-to'g'ri 'url' yoki eng sifatli 'thumbnail'ni ishlatamiz
+                if 'url' in item:
+                    direct_url = item['url']
+                else:
+                    best_thumbnail = sorted(item.get('thumbnails', []), key=lambda t: t.get('height', 0))[-1]
+                    direct_url = best_thumbnail.get('url')
+                attributes = [DocumentAttributePhoto()]
 
-        thumbnail_url = info_dict.get('thumbnail')
-        duration = int(info_dict.get('duration', 0))
-
-        last_update_time = 0
-        async def upload_progress(current, total):
-            nonlocal last_update_time
-            if time.time() - last_update_time > 2:
+            if direct_url:
                 try:
-                    percentage = current * 100 / total
-                    await safe_edit_message(processing_message, f"📤 Yuborilmoqda... {percentage:.1f}%")
-                except (ZeroDivisionError, TypeError):
-                    await safe_edit_message(processing_message, f"📤 Yuborilmoqda...")
-                last_update_time = time.time()
+                    last_sent_message = await client.send_file(
+                        chat_id,
+                        file=direct_url,
+                        caption=caption_text,
+                        parse_mode='markdown',
+                        attributes=attributes
+                    )
+                    await asyncio.sleep(1) # Telegram spam-filtridan o'tish uchun
+                except Exception as send_error:
+                    log.error(f"Fayl yuborishda xatolik ({direct_url}): {send_error}")
+                    await event.reply(f"❌ {i+1}-faylni yuborishda xatolik yuz berdi.")
 
-        attributes = [DocumentAttributeVideo(
-            duration=duration, w=best_format.get('width', 0), h=best_format.get('height', 0),
-            supports_streaming=True
-        )]
-        
-        sent_video_message = await client.send_file(
-            chat_id, file=direct_url, caption=caption_text, parse_mode='markdown',
-            attributes=attributes, thumb=thumbnail_url, progress_callback=upload_progress
-        )
         await client.delete_messages(chat_id, processing_message)
         
         # --- Matnni olish tugmasini yuborish (FAQAT Instagram uchun) ---
-        description = info_dict.get('description')
-        if 'instagram.com' in url.lower() and description and description.strip():
+        description = info_dict.get('description') or (media_items[0].get('description') if media_items else '')
+        if 'instagram.com' in url.lower() and description and description.strip() and last_sent_message:
             unique_id = str(uuid.uuid4())
             post_data_cache[unique_id] = description
             
             buttons = [Button.inline("Post matnini olish 👇", data=f"get_text_{unique_id}")]
             try:
-                await sent_video_message.reply("Video tavsifini yuklab olish uchun bosing:", buttons=buttons)
-            except BotMethodInvalidError:
-                # Agar video bilan birga tugma yuborish imkoni bo'lmasa (kanal posti va h.k.)
-                await event.reply("Video tavsifini yuklab olish uchun bosing:", buttons=buttons)
+                # Tugmani oxirgi yuborilgan mediaga javob sifatida yuborish
+                await last_sent_message.reply("Video/post tavsifini yuklab olish uchun bosing:", buttons=buttons)
+            except (BotMethodInvalidError, AttributeError):
+                 await event.reply("Video/post tavsifini yuklab olish uchun bosing:", buttons=buttons)
 
     except Exception as e:
         log.error(f"Jarayonda xatolik: {e}", exc_info=True)
         error_text = str(e)
         site_name = "Pinterest" if "pinterest" in url or "pin.it" in url else "Instagram"
         if "login is required" in error_text:
-            error_text = f"Bu shaxsiy video yoki {site_name.upper()}_COOKIE sozlanmagan."
+            error_text = f"Bu shaxsiy media yoki {site_name.upper()}_COOKIE sozlanmagan/eskirgan."
         elif "HTTP Error 404" in error_text:
-            error_text = "Video topilmadi yoki o'chirilgan."
+            error_text = "Media topilmadi yoki o'chirilgan."
         elif "fetching the webpage" in error_text.lower():
             error_text = "Telegram bu havolani ocha olmadi. Bu vaqtinchalik muammo bo'lishi mumkin."
         else:
             error_text = "Noma'lum xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring."
-        await safe_edit_message(processing_message, f"❌ Kechirasiz, xatolik yuz berdi.\n\n`{error_text}`")
+        if processing_message:
+            await safe_edit_message(processing_message, f"❌ Kechirasiz, xatolik yuz berdi.\n\n`{error_text}`")
     finally:
         if cookie_file and os.path.exists(cookie_file):
             os.remove(cookie_file)
@@ -216,8 +235,8 @@ async def worker():
 async def start_handler(event):
     """/start komandasiga javob beradi."""
     await event.reply(
-        "Assalomu alaykum! Men Instagram va Pinterest'dan video yuklab bera olaman.\n\n"
-        "Shunchaki, kerakli video havolasini menga yuboring."
+        "Assalomu alaykum! Men Instagram (Post, Reel, Story) va Pinterest'dan media yuklab bera olaman.\n\n"
+        "Shunchaki, kerakli media havolasini menga yuboring."
     )
 
 @client.on(events.NewMessage(pattern=SUPPORTED_URL_RE))
@@ -225,7 +244,8 @@ async def general_url_handler(event):
     """Barcha qo'llab-quvvatlanadigan havolalar uchun ishlaydi."""
     url = event.text.strip()
     ydl_opts = {
-        'noplaylist': True, 'retries': 5, 'quiet': True, 'noprogress': True,
+        'noplaylist': False, # Karusellarni yuklash uchun False bo'lishi kerak
+        'retries': 5, 'quiet': True, 'noprogress': True,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         }
@@ -235,25 +255,33 @@ async def general_url_handler(event):
 @client.on(events.CallbackQuery(pattern=b'get_text_'))
 async def get_text_callback_handler(event):
     """"Post matnini olish" tugmasi bosilganda ishlaydi."""
+    await event.answer()
+
     unique_id = event.data.decode('utf-8').split('_')[2]
-    description = post_data_cache.get(unique_id) # .get() ishlatiladi, .pop() o'rniga
+    description = post_data_cache.get(unique_id)
 
     if not description:
-        await event.answer("❌ Bu so'rov muddati tugagan yoki matn topilmadi.", alert=True)
+        await event.answer("❌ Matn topilmadi yoki bu so'rov eskirgan.", alert=True)
         return
 
     try:
-        # Matnni alohida xabar qilib, videoga javob sifatida yuboramiz
-        await event.client.send_message(
-            event.chat_id,
-            description,
-            reply_to=event.message.reply_to_msg_id
-        )
-        # Tugma bosilgandan so'ng, u joylashgan xabarni tahrirlaymiz
-        await event.edit("✅ Matn yuborildi.")
+        MESSAGE_CHAR_LIMIT = 4096
+        text_parts = [description[i:i + MESSAGE_CHAR_LIMIT] for i in range(0, len(description), MESSAGE_CHAR_LIMIT)]
+
+        for part in text_parts:
+            await event.client.send_message(
+                event.chat_id,
+                part,
+                reply_to=event.message.reply_to_msg_id
+            )
+            await asyncio.sleep(0.1)
+
+        await event.edit("✅ Matn yuborildi.", buttons=None)
+
     except Exception as e:
         log.error(f"Matn yuborishda xatolik: {e}")
-        await event.answer("❌ Matnni yuborishda xatolik yuz berdi.")
+        await event.answer("❌ Matnni yuborishda xatolik yuz berdi.", alert=True)
+
 
 async def main():
     """Botni ishga tushiruvchi asosiy funksiya."""
@@ -270,4 +298,3 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("Bot foydalanuvchi tomonidan to'xtatildi.")
-
