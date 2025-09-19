@@ -4,9 +4,9 @@
 Telegram Bot for Downloading Videos from Instagram and Pinterest.
 
 This bot uses the Telethon library to interact with Telegram and yt-dlp
-to extract video information. It downloads the video content into memory
-and uploads it directly to Telegram, ensuring reliability. For Instagram,
-it provides an option to fetch the post's description after the video is sent.
+to extract video information. It sends videos directly via URL to Telegram.
+For Instagram, it provides an option to fetch the post's description
+after the video is sent.
 """
 
 import os
@@ -15,12 +15,10 @@ import asyncio
 import logging
 import uuid
 import time
-import httpx
-from io import BytesIO
 
 from telethon import TelegramClient, events, Button
 from telethon.tl.types import DocumentAttributeVideo
-from telethon.errors import MessageNotModifiedError
+from telethon.errors import MessageNotModifiedError, BotMethodInvalidError
 from yt_dlp import YoutubeDL
 
 # --- Logger sozlamalari (dastur ishlashini kuzatish va xatoliklarni oson topish uchun) ---
@@ -112,7 +110,7 @@ async def clear_cache_entry(key, delay_seconds=300):
 # ### ASOSIY YUKLASH FUNKSIYASI ###
 async def process_and_send(event, url, ydl_opts, initial_message=None):
     """
-    Videoni xotiraga yuklab olib, Telegramga fayl sifatida yuboradi.
+    Videoni to'g'ridan-to'g'ri havola orqali Telegramga yuboradi.
     """
     chat_id = event.chat_id
     processing_message = None
@@ -147,15 +145,7 @@ async def process_and_send(event, url, ydl_opts, initial_message=None):
             await safe_edit_message(processing_message, "❌ Kechirasiz, video uchun yuklab olish havolasi topilmadi.")
             return
 
-        await safe_edit_message(processing_message, "✅ Video topildi. Yuklab olinmoqda...")
-        
-        async with httpx.AsyncClient() as http_client:
-            response = await http_client.get(direct_url, timeout=90.0)
-            response.raise_for_status()
-            video_bytes = response.content
-        
-        video_stream = BytesIO(video_bytes)
-        video_stream.name = f"{info_dict.get('id', 'video')}.mp4"
+        await safe_edit_message(processing_message, "✅ Havola topildi. Telegram'ga yuborilmoqda...")
 
         title = info_dict.get('title', 'Nomsiz video')
         uploader = info_dict.get('uploader', "Noma'lum manba")
@@ -168,8 +158,11 @@ async def process_and_send(event, url, ydl_opts, initial_message=None):
         async def upload_progress(current, total):
             nonlocal last_update_time
             if time.time() - last_update_time > 2:
-                percentage = current * 100 / total
-                await safe_edit_message(processing_message, f"📤 Yuborilmoqda... {percentage:.1f}%")
+                try:
+                    percentage = current * 100 / total
+                    await safe_edit_message(processing_message, f"📤 Yuborilmoqda... {percentage:.1f}%")
+                except (ZeroDivisionError, TypeError):
+                    await safe_edit_message(processing_message, f"📤 Yuborilmoqda...")
                 last_update_time = time.time()
 
         attributes = [DocumentAttributeVideo(
@@ -178,7 +171,7 @@ async def process_and_send(event, url, ydl_opts, initial_message=None):
         )]
         
         sent_video_message = await client.send_file(
-            chat_id, file=video_stream, caption=caption_text, parse_mode='markdown',
+            chat_id, file=direct_url, caption=caption_text, parse_mode='markdown',
             attributes=attributes, thumb=thumbnail_url, progress_callback=upload_progress
         )
         await client.delete_messages(chat_id, processing_message)
@@ -190,7 +183,12 @@ async def process_and_send(event, url, ydl_opts, initial_message=None):
             post_data_cache[unique_id] = description
             
             buttons = [Button.inline("Post matnini olish 👇", data=f"get_text_{unique_id}")]
-            await sent_video_message.reply("Video tavsifini yuklab olish uchun bosing:", buttons=buttons)
+            try:
+                await sent_video_message.reply("Video tavsifini yuklab olish uchun bosing:", buttons=buttons)
+            except BotMethodInvalidError:
+                # Agar video bilan birga tugma yuborish imkoni bo'lmasa (kanal posti va h.k.)
+                await event.reply("Video tavsifini yuklab olish uchun bosing:", buttons=buttons)
+
             asyncio.create_task(clear_cache_entry(unique_id))
 
     except Exception as e:
@@ -201,6 +199,8 @@ async def process_and_send(event, url, ydl_opts, initial_message=None):
             error_text = f"Bu shaxsiy video yoki {site_name.upper()}_COOKIE sozlanmagan."
         elif "HTTP Error 404" in error_text:
             error_text = "Video topilmadi yoki o'chirilgan."
+        elif "fetching the webpage" in error_text.lower():
+            error_text = "Telegram bu havolani ocha olmadi. Bu vaqtinchalik muammo bo'lishi mumkin."
         else:
             error_text = "Noma'lum xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring."
         await safe_edit_message(processing_message, f"❌ Kechirasiz, xatolik yuz berdi.\n\n`{error_text}`")
