@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Telegram Bot for Downloading Videos from YouTube and Instagram.
+Telegram Bot for Downloading Videos from Instagram and Pinterest.
 
 This bot uses the Telethon library to interact with Telegram and yt-dlp
 to extract download links from various video platforms. It operates on an
@@ -35,9 +35,8 @@ try:
     API_HASH = os.environ.get("API_HASH")
     BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
     # Cookie fayllar yosh cheklovi bo'lgan yoki maxfiy videolarni yuklash uchun kerak
-    TIKTOK_COOKIE = os.environ.get("TIKTOK_COOKIE")
     INSTAGRAM_COOKIE = os.environ.get("INSTAGRAM_COOKIE")
-    PINTEREST_COOKIE = os.environ.get("PINTEREST_COOKIE") # Pinterest uchun yangi cookie o'zgaruvchisi
+    PINTEREST_COOKIE = os.environ.get("PINTEREST_COOKIE")
     BOT_USERNAME = os.environ.get("BOT_USERNAME", "@Allsavervide0bot")
 except (ValueError, TypeError):
     log.critical("API_ID, API_HASH yoki TELEGRAM_TOKEN muhit o'zgaruvchilarida topilmadi yoki noto'g'ri formatda.")
@@ -54,8 +53,6 @@ download_queue = asyncio.Queue()
 SUPPORTED_URL_RE = re.compile(
     r'https?://(?:www\.)?(?:'
     r'instagram\.com/(?:p|reel|tv|stories)/[a-zA-Z0-9_-]+'
-    r'|'
-    r'(?:vm\.)?tiktok\.com/.*'
     r'|'
     r'(?:pinterest\.com|pin\.it)/.*'
     r')'
@@ -76,9 +73,6 @@ def get_cookie_for_url(url):
     if 'instagram.com' in lower_url:
         cookie_data = INSTAGRAM_COOKIE
         cookie_file_path = f'instagram_cookies_{uuid.uuid4()}.txt'
-    elif 'tiktok.com' in lower_url:
-        cookie_data = TIKTOK_COOKIE
-        cookie_file_path = f'tiktok_cookies_{uuid.uuid4()}.txt'
     elif 'pinterest.com' in lower_url or 'pin.it' in lower_url:
         cookie_data = PINTEREST_COOKIE
         cookie_file_path = f'pinterest_cookies_{uuid.uuid4()}.txt'
@@ -225,6 +219,8 @@ async def process_and_send(event, url, ydl_opts, initial_message=None):
             error_text = "Bu shaxsiy (private) video. Uni yuklab bo'lmaydi yoki cookie sozlanmagan."
         elif "HTTP Error 404" in error_text:
             error_text = "Video topilmadi yoki o'chirilgan."
+        elif "Failure while fetching the webpage" in error_text or "SendMediaRequest" in error_text:
+             error_text = "Video havolasini Telegramga yuborishda xatolik yuz berdi. Bu vaqtinchalik muammo bo'lishi mumkin. Iltimos, bir necha daqiqadan so'ng qayta urinib ko'ring."
         await safe_edit_message(processing_message, f"❌ Kechirasiz, xatolik yuz berdi.\n\n`{error_text}`")
     finally:
         # Vaqtinchalik cookie faylini o'chirish
@@ -269,7 +265,7 @@ async def worker():
 async def start_handler(event):
     """Botga /start komandasi yuborilganda javob beradi."""
     await event.reply(
-        "Assalomu alaykum! Men Instagram, TikTok va Pinterest'dan video yuklab bera olaman.\n\n"
+        "Assalomu alaykum! Men Instagram va Pinterest'dan video yuklab bera olaman.\n\n"
         "Shunchaki, kerakli video havolasini menga yuboring."
     )
 
@@ -282,7 +278,12 @@ async def general_url_handler(event):
     # Standart sozlamalar
     ydl_opts = {
         'noplaylist': True,
-        'retries': 5
+        'retries': 5,
+        'quiet': True,
+        'noprogress': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        }
     }
     # Vazifani navbatga qo'yamiz. `initial_message` ham qo'shiladi,
     # chunki u jarayon oxirida o'chirilishi kerak.
