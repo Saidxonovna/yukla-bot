@@ -5,7 +5,8 @@ Telegram Bot for Downloading Videos from Instagram and Pinterest.
 
 This bot uses the Telethon library to interact with Telegram and yt-dlp
 to extract video information. It downloads the video content into memory
-and uploads it directly to Telegram, ensuring reliability.
+and uploads it directly to Telegram, ensuring reliability. For Instagram,
+it provides an option to fetch the post's description after the video is sent.
 """
 
 import os
@@ -30,12 +31,10 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # --- O'zgaruvchilarni muhitdan (environment variables) xavfsiz o'qish ---
-# Bot ishlashi uchun zarur bo'lgan maxfiy ma'lumotlar
 try:
     API_ID = int(os.environ.get("API_ID"))
     API_HASH = os.environ.get("API_HASH")
     BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-    # Cookie fayllar yosh cheklovi bo'lgan yoki maxfiy videolarni yuklash uchun kerak
     INSTAGRAM_COOKIE = os.environ.get("INSTAGRAM_COOKIE")
     PINTEREST_COOKIE = os.environ.get("PINTEREST_COOKIE")
     BOT_USERNAME = os.environ.get("BOT_USERNAME", "@Allsavervide0bot")
@@ -47,13 +46,12 @@ except (ValueError, TypeError):
 client = TelegramClient('bot_session', API_ID, API_HASH)
 
 # --- Global o'zgaruvchilar ---
-# Yuklab olish uchun navbat (bir vaqtda bir nechta so'rovni boshqarish uchun)
 download_queue = asyncio.Queue()
-# Instagram'dan kelgan va tugma bosilishini kutayotgan so'rovlarni saqlash uchun
-pending_instagram_requests = {}
+# Videoning matnini vaqtinchalik saqlash uchun kesh
+post_data_cache = {}
 
 
-# --- Qo'llab-quvvatlanadigan URL manzillari uchun Regex (regular expressions) ---
+# --- Qo'llab-quvvatlanadigan URL manzillari uchun Regex ---
 SUPPORTED_URL_RE = re.compile(
     r'https?://(?:www\.)?(?:'
     r'instagram\.com/(?:p|reel|tv|stories)/[a-zA-Z0-9_-]+'
@@ -68,8 +66,7 @@ SUPPORTED_URL_RE = re.compile(
 def get_cookie_for_url(url):
     """
     Berilgan havolaga mos keladigan cookie ma'lumotini vaqtinchalik faylga yozadi
-    va shu faylning nomini qaytaradi. Bu yosh cheklovi bor yoki yopiq
-    kontentni yuklash uchun zarur.
+    va shu faylning nomini qaytaradi.
     """
     cookie_data = None
     lower_url = url.lower()
@@ -94,8 +91,7 @@ def get_cookie_for_url(url):
 
 async def safe_edit_message(message, text, **kwargs):
     """
-    Xabarni tahrirlashda xatolik yuzaga kelsa, botning to'xtab qolishining
-    oldini oladi. Agar xabar o'zgarmagan bo'lsa, hech narsa qilmaydi.
+    Xabarni xavfsiz tahrirlaydi, xatoliklarni oldini oladi.
     """
     if not message or message.text == text:
         return
@@ -106,12 +102,17 @@ async def safe_edit_message(message, text, **kwargs):
     except Exception as e:
         log.warning(f"Xabarni tahrirlashda kutilmagan xatolik: {e}")
 
+async def clear_cache_entry(key, delay_seconds=300):
+    """Belgilangan vaqtdan so'ng keshdan ma'lumotni o'chiradi."""
+    await asyncio.sleep(delay_seconds)
+    if post_data_cache.pop(key, None):
+        log.info(f"Keshdan '{key}' kaliti 5 daqiqadan so'ng o'chirildi.")
 
-# ### ASOSIY YANGILANGAN FUNKSIYA ###
-async def process_and_send(event, url, ydl_opts, initial_message=None, download_caption=False):
+
+# ### ASOSIY YUKLASH FUNKSIYASI ###
+async def process_and_send(event, url, ydl_opts, initial_message=None):
     """
-    Videoni xotiraga yuklab olib, to'g'ridan-to'g'ri Telegramga fayl
-    sifatida yuboradi. Bu usul ancha ishonchli.
+    Videoni xotiraga yuklab olib, Telegramga fayl sifatida yuboradi.
     """
     chat_id = event.chat_id
     processing_message = None
@@ -148,7 +149,6 @@ async def process_and_send(event, url, ydl_opts, initial_message=None, download_
 
         await safe_edit_message(processing_message, "✅ Video topildi. Yuklab olinmoqda...")
         
-        # Videoni xotiraga yuklash
         async with httpx.AsyncClient() as http_client:
             response = await http_client.get(direct_url, timeout=90.0)
             response.raise_for_status()
@@ -157,24 +157,9 @@ async def process_and_send(event, url, ydl_opts, initial_message=None, download_
         video_stream = BytesIO(video_bytes)
         video_stream.name = f"{info_dict.get('id', 'video')}.mp4"
 
-        # --- Yangilangan caption mantig'i ---
         title = info_dict.get('title', 'Nomsiz video')
         uploader = info_dict.get('uploader', "Noma'lum manba")
-        
-        base_caption = f"\n\nManba: {uploader}\nYuklab berdi: {BOT_USERNAME}"
-        caption_text = f"**{title}**"
-        
-        # Agar foydalanuvchi matnni ham yuklashni tanlagan bo'lsa
-        if download_caption:
-            description = info_dict.get('description')
-            if description:
-                # Telegramning media uchun 1024 belgilik chegarasiga sig'dirish
-                max_len = 1024 - len(caption_text) - len(base_caption) - 20 # 20 belgi zaxira uchun
-                if len(description) > max_len:
-                    description = description[:max_len] + "..."
-                caption_text += f"\n\n{description}"
-        
-        caption_text += base_caption
+        caption_text = f"**{title}**\n\nManba: {uploader}\nYuklab berdi: {BOT_USERNAME}"
 
         thumbnail_url = info_dict.get('thumbnail')
         duration = int(info_dict.get('duration', 0))
@@ -192,23 +177,28 @@ async def process_and_send(event, url, ydl_opts, initial_message=None, download_
             supports_streaming=True
         )]
         
-        await client.send_file(
-            chat_id,
-            file=video_stream,
-            caption=caption_text,
-            parse_mode='markdown',
-            attributes=attributes,
-            thumb=thumbnail_url,
-            progress_callback=upload_progress
+        sent_video_message = await client.send_file(
+            chat_id, file=video_stream, caption=caption_text, parse_mode='markdown',
+            attributes=attributes, thumb=thumbnail_url, progress_callback=upload_progress
         )
         await client.delete_messages(chat_id, processing_message)
+        
+        # --- Matnni olish tugmasini yuborish (FAQAT Instagram uchun) ---
+        description = info_dict.get('description')
+        if 'instagram.com' in url.lower() and description and description.strip():
+            unique_id = str(uuid.uuid4())
+            post_data_cache[unique_id] = description
+            
+            buttons = [Button.inline("Post matnini olish 👇", data=f"get_text_{unique_id}")]
+            await sent_video_message.reply("Video tavsifini yuklab olish uchun bosing:", buttons=buttons)
+            asyncio.create_task(clear_cache_entry(unique_id))
 
     except Exception as e:
         log.error(f"Jarayonda xatolik: {e}", exc_info=True)
         error_text = str(e)
+        site_name = "Pinterest" if "pinterest" in url or "pin.it" in url else "Instagram"
         if "login is required" in error_text:
-            site_name = "Pinterest" if "pinterest" in url or "pin.it" in url else "Instagram"
-            error_text = f"Bu shaxsiy video. Uni yuklab bo'lmaydi yoki {site_name.upper()}_COOKIE sozlanmagan."
+            error_text = f"Bu shaxsiy video yoki {site_name.upper()}_COOKIE sozlanmagan."
         elif "HTTP Error 404" in error_text:
             error_text = "Video topilmadi yoki o'chirilgan."
         else:
@@ -220,18 +210,15 @@ async def process_and_send(event, url, ydl_opts, initial_message=None, download_
         if initial_message:
             try:
                 await client.delete_messages(chat_id, initial_message)
-            except Exception as e:
-                log.warning(f"Boshlang'ich xabarni o'chirishda xatolik: {e}")
+            except Exception:
+                pass
 
 async def worker():
-    """
-    Navbatdan (queue) vazifalarni olib, ularni birma-bir qayta ishlaydi.
-    """
+    """Navbatdan vazifalarni olib, ularni qayta ishlaydi."""
     while True:
-        item = await download_queue.get()
-        event, url, ydl_opts, initial_message, download_caption = item
+        event, url, ydl_opts, initial_message = await download_queue.get()
         try:
-            await process_and_send(event, url, ydl_opts, initial_message, download_caption)
+            await process_and_send(event, url, ydl_opts, initial_message)
         except Exception as e:
             log.error(f"Worker'da kutilmagan xatolik: {e}", exc_info=True)
         finally:
@@ -240,7 +227,7 @@ async def worker():
 # --- TELEGRAM HANDLER'LARI ---
 @client.on(events.NewMessage(pattern='/start'))
 async def start_handler(event):
-    """Botga /start komandasi yuborilganda javob beradi."""
+    """/start komandasiga javob beradi."""
     await event.reply(
         "Assalomu alaykum! Men Instagram va Pinterest'dan video yuklab bera olaman.\n\n"
         "Shunchaki, kerakli video havolasini menga yuboring."
@@ -249,70 +236,38 @@ async def start_handler(event):
 @client.on(events.NewMessage(pattern=SUPPORTED_URL_RE))
 async def general_url_handler(event):
     """Barcha qo'llab-quvvatlanadigan havolalar uchun ishlaydi."""
-    url = event.text.strip()
-    
-    # Agar havola Instagram'dan bo'lsa, matnni yuklash haqida so'raymiz
-    if 'instagram.com' in url.lower():
-        unique_id = str(uuid.uuid4())
-        pending_instagram_requests[unique_id] = url
-        
-        buttons = [
-            [
-                Button.inline("✅ Ha, matn bilan", data=f"insta_yes_{unique_id}"),
-                Button.inline("❌ Yo'q, faqat video", data=f"insta_no_{unique_id}")
-            ]
-        ]
-        
-        await event.reply("Instagram videosining matnini (description) ham birga yuklansinmi?", buttons=buttons)
-        return
-
-    # Boshqa saytlar (Pinterest) uchun to'g'ridan-to'g'ri navbatga qo'yamiz
     initial_message = await event.reply("✅ So'rovingiz qabul qilindi va navbatga qo'yildi...")
-    
+    url = event.text.strip()
     ydl_opts = {
-        'noplaylist': True,
-        'retries': 5,
-        'quiet': True,
-        'noprogress': True,
+        'noplaylist': True, 'retries': 5, 'quiet': True, 'noprogress': True,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         }
     }
-    # Navbatga 5 ta element qo'yamiz (oxirgisi 'download_caption' uchun False)
-    await download_queue.put((event, url, ydl_opts, initial_message, False))
+    await download_queue.put((event, url, ydl_opts, initial_message))
 
-@client.on(events.CallbackQuery(pattern=b'insta_'))
-async def instagram_callback_handler(event):
-    """Instagram uchun tugma bosilganda ishlaydi."""
-    
-    data = event.data.decode('utf-8').split('_')
-    choice = data[1]
-    unique_id = data[2]
-    
-    url = pending_instagram_requests.pop(unique_id, None)
+@client.on(events.CallbackQuery(pattern=b'get_text_'))
+async def get_text_callback_handler(event):
+    """"Post matnini olish" tugmasi bosilganda ishlaydi."""
+    unique_id = event.data.decode('utf-8').split('_')[2]
+    description = post_data_cache.pop(unique_id, None)
 
-    if not url:
-        await event.edit("❌ Bu so'rov muddati tugagan yoki bekor qilingan.")
+    if not description:
+        await event.answer("❌ Bu so'rov muddati tugagan yoki matn topilmadi.", alert=True)
         return
 
-    # Foydalanuvchiga uning so'rovi qabul qilinganini bildirish uchun tugmali xabarni tahrirlaymiz
-    await event.edit("✅ So'rovingiz qabul qilindi va navbatga qo'yildi...")
-    
-    download_caption = (choice == 'yes')
-    
-    ydl_opts = {
-        'noplaylist': True,
-        'retries': 5,
-        'quiet': True,
-        'noprogress': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        }
-    }
-    # Navbatga 5 ta element qo'yamiz. 'initial_message' bu tugmali xabar bo'ladi
-    # va jarayon oxirida o'chirilishi kerak.
-    await download_queue.put((event, url, ydl_opts, event.message, download_caption))
-
+    try:
+        # Matnni alohida xabar qilib, videoga javob sifatida yuboramiz
+        await event.client.send_message(
+            event.chat_id,
+            description,
+            reply_to=event.message.reply_to_msg_id
+        )
+        # Tugma bosilgandan so'ng, u joylashgan xabarni o'chiramiz
+        await event.delete()
+    except Exception as e:
+        log.error(f"Matn yuborishda xatolik: {e}")
+        await event.answer("❌ Matnni yuborishda xatolik yuz berdi.")
 
 async def main():
     """Botni ishga tushiruvchi asosiy funksiya."""
