@@ -18,7 +18,7 @@ import uuid
 import time
 
 from telethon import TelegramClient, events, Button
-from telethon.tl.types import DocumentAttributeVideo, DocumentAttributePhoto
+from telethon.tl.types import DocumentAttributeVideo # DocumentAttributePhoto olib tashlandi
 from telethon.errors import MessageNotModifiedError, BotMethodInvalidError
 from yt_dlp import YoutubeDL
 
@@ -170,7 +170,7 @@ async def process_and_send(event, url, ydl_opts):
                 else:
                     best_thumbnail = sorted(item.get('thumbnails', []), key=lambda t: t.get('height', 0))[-1]
                     direct_url = best_thumbnail.get('url')
-                attributes = [DocumentAttributePhoto()]
+                # DocumentAttributePhoto keraksiz, olib tashlandi
 
             if direct_url:
                 try:
