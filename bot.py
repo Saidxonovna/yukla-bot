@@ -265,7 +265,6 @@ async def general_url_handler(event):
     
     # Standart sozlamalar
     ydl_opts = {
-        'format': 'best',
         'noplaylist': True,
         'retries': 5
     }
@@ -294,5 +293,4 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("Bot foydalanuvchi tomonidan to'xtatildi.")
-
 
