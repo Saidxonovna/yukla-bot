@@ -100,15 +100,9 @@ async def safe_edit_message(message, text, **kwargs):
     except Exception as e:
         log.warning(f"Xabarni tahrirlashda kutilmagan xatolik: {e}")
 
-async def clear_cache_entry(key, delay_seconds=300):
-    """Belgilangan vaqtdan so'ng keshdan ma'lumotni o'chiradi."""
-    await asyncio.sleep(delay_seconds)
-    if post_data_cache.pop(key, None):
-        log.info(f"Keshdan '{key}' kaliti 5 daqiqadan so'ng o'chirildi.")
-
 
 # ### ASOSIY YUKLASH FUNKSIYASI ###
-async def process_and_send(event, url, ydl_opts, initial_message=None):
+async def process_and_send(event, url, ydl_opts):
     """
     Videoni to'g'ridan-to'g'ri havola orqali Telegramga yuboradi.
     """
@@ -189,8 +183,6 @@ async def process_and_send(event, url, ydl_opts, initial_message=None):
                 # Agar video bilan birga tugma yuborish imkoni bo'lmasa (kanal posti va h.k.)
                 await event.reply("Video tavsifini yuklab olish uchun bosing:", buttons=buttons)
 
-            asyncio.create_task(clear_cache_entry(unique_id))
-
     except Exception as e:
         log.error(f"Jarayonda xatolik: {e}", exc_info=True)
         error_text = str(e)
@@ -207,18 +199,13 @@ async def process_and_send(event, url, ydl_opts, initial_message=None):
     finally:
         if cookie_file and os.path.exists(cookie_file):
             os.remove(cookie_file)
-        if initial_message:
-            try:
-                await client.delete_messages(chat_id, initial_message)
-            except Exception:
-                pass
 
 async def worker():
     """Navbatdan vazifalarni olib, ularni qayta ishlaydi."""
     while True:
-        event, url, ydl_opts, initial_message = await download_queue.get()
+        event, url, ydl_opts = await download_queue.get()
         try:
-            await process_and_send(event, url, ydl_opts, initial_message)
+            await process_and_send(event, url, ydl_opts)
         except Exception as e:
             log.error(f"Worker'da kutilmagan xatolik: {e}", exc_info=True)
         finally:
@@ -236,7 +223,6 @@ async def start_handler(event):
 @client.on(events.NewMessage(pattern=SUPPORTED_URL_RE))
 async def general_url_handler(event):
     """Barcha qo'llab-quvvatlanadigan havolalar uchun ishlaydi."""
-    initial_message = await event.reply("✅ So'rovingiz qabul qilindi va navbatga qo'yildi...")
     url = event.text.strip()
     ydl_opts = {
         'noplaylist': True, 'retries': 5, 'quiet': True, 'noprogress': True,
@@ -244,13 +230,13 @@ async def general_url_handler(event):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         }
     }
-    await download_queue.put((event, url, ydl_opts, initial_message))
+    await download_queue.put((event, url, ydl_opts))
 
 @client.on(events.CallbackQuery(pattern=b'get_text_'))
 async def get_text_callback_handler(event):
     """"Post matnini olish" tugmasi bosilganda ishlaydi."""
     unique_id = event.data.decode('utf-8').split('_')[2]
-    description = post_data_cache.pop(unique_id, None)
+    description = post_data_cache.get(unique_id) # .get() ishlatiladi, .pop() o'rniga
 
     if not description:
         await event.answer("❌ Bu so'rov muddati tugagan yoki matn topilmadi.", alert=True)
@@ -263,8 +249,8 @@ async def get_text_callback_handler(event):
             description,
             reply_to=event.message.reply_to_msg_id
         )
-        # Tugma bosilgandan so'ng, u joylashgan xabarni o'chiramiz
-        await event.delete()
+        # Tugma bosilgandan so'ng, u joylashgan xabarni tahrirlaymiz
+        await event.edit("✅ Matn yuborildi.")
     except Exception as e:
         log.error(f"Matn yuborishda xatolik: {e}")
         await event.answer("❌ Matnni yuborishda xatolik yuz berdi.")
