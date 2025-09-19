@@ -37,6 +37,7 @@ try:
     # Cookie fayllar yosh cheklovi bo'lgan yoki maxfiy videolarni yuklash uchun kerak
     TIKTOK_COOKIE = os.environ.get("TIKTOK_COOKIE")
     INSTAGRAM_COOKIE = os.environ.get("INSTAGRAM_COOKIE")
+    PINTEREST_COOKIE = os.environ.get("PINTEREST_COOKIE") # Pinterest uchun yangi cookie o'zgaruvchisi
     BOT_USERNAME = os.environ.get("BOT_USERNAME", "@Allsavervide0bot")
 except (ValueError, TypeError):
     log.critical("API_ID, API_HASH yoki TELEGRAM_TOKEN muhit o'zgaruvchilarida topilmadi yoki noto'g'ri formatda.")
@@ -78,6 +79,9 @@ def get_cookie_for_url(url):
     elif 'tiktok.com' in lower_url:
         cookie_data = TIKTOK_COOKIE
         cookie_file_path = f'tiktok_cookies_{uuid.uuid4()}.txt'
+    elif 'pinterest.com' in lower_url or 'pin.it' in lower_url:
+        cookie_data = PINTEREST_COOKIE
+        cookie_file_path = f'pinterest_cookies_{uuid.uuid4()}.txt'
     else:
         return None
 
@@ -290,4 +294,5 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("Bot foydalanuvchi tomonidan to'xtatildi.")
+
 
