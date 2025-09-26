@@ -45,7 +45,6 @@ INSTAGRAM_RE = re.compile(r'https?://(?:www\.)?instagram\.com/(?:p|reel|tv)/[a-z
 
 @lru_cache(maxsize=128)
 def get_cookie_for_url(url):
-    """Havolani tahlil qilib, mos cookie faylini yaratadi va uning nomini qaytaradi."""
     cookie_file_path = None
     cookie_data = None
     lower_url = url.lower()
@@ -64,18 +63,14 @@ def get_cookie_for_url(url):
     return None
 
 async def safe_edit_message(message, text, **kwargs):
-    """Xabarni xavfsiz tahrirlaydi, 'MessageNotModifiedError' xatosini e'tiborsiz qoldiradi."""
-    if not message or message.text == text:
-        return
+    if not message or message.text == text: return
     try:
         await message.edit(text, **kwargs)
-    except MessageNotModifiedError:
-        pass
+    except MessageNotModifiedError: pass
     except Exception as e:
         log.warning(f"Xabarni tahrirlashda kutilmagan xatolik: {e}")
 
 async def download_and_send(event, url, ydl_opts):
-    """Videoni yuklaydi, yuboradi va tavsif (description) uchun tugma taklif qiladi."""
     chat_id = event.chat_id
     processing_message = None
     cookie_file = None
@@ -118,8 +113,10 @@ async def download_and_send(event, url, ydl_opts):
         await safe_edit_message(processing_message, "✅ **Yuklab olindi. Endi yuboraman...**", parse_mode='markdown')
 
         title = info_dict.get('title', 'Nomsiz video')
-        uploader = info_dict.get('uploader', 'Noma\'lum manba')
-        caption_text = f"**{title}**\n\nManba: {uploader}\n\nYuklab berildi: @Allsavervide0bot" # <-- O'zingizni bot userneumingizni yozing
+        
+        # --- O'ZGARTIRISH SHU YERDA ---
+        # "Manba: {uploader}" qatori olib tashlandi
+        caption_text = f"**{title}**\n\nYuklab berildi: @Allsavervide0bot" # <-- O'zingizni bot userneumingizni yozing
 
         async def upload_progress(current, total):
             percentage = current * 100 / total
@@ -163,7 +160,6 @@ async def download_and_send(event, url, ydl_opts):
 
 
 async def worker():
-    """Navbatdan vazifalarni olib, ularni qayta ishlaydi."""
     while True:
         try:
             event, url, ydl_opts = await download_queue.get()
@@ -242,6 +238,7 @@ async def main_handler(event):
                 'outtmpl': 'downloads/%(id)s.%(ext)s',
                 'noplaylist': True,
                 'max_filesize': 1024 * 1024 * 1024,
+                'postprocessor_args': ['-movflags', '+faststart'],
             }
             await download_queue.put((event, url, ydl_opts))
             
@@ -303,9 +300,11 @@ async def callback_handler(event):
             }]
         else:
             ydl_opts['format'] = f'best[ext=mp4][height<={quality}]/best[height<={quality}]'
+            ydl_opts['postprocessor_args'] = ['-movflags', '+faststart']
     
     elif action == "video":
         ydl_opts['format'] = 'best[ext=mp4][height<=720]/best[height<=720]'
+        ydl_opts['postprocessor_args'] = ['-movflags', '+faststart']
 
     await download_queue.put((event, url, ydl_opts))
 
