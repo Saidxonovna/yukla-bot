@@ -238,7 +238,7 @@ async def main_handler(event):
             )
         elif INSTAGRAM_RE.match(url):
             ydl_opts = {
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                'format': 'best[ext=mp4]/best',
                 'outtmpl': 'downloads/%(id)s.%(ext)s',
                 'noplaylist': True,
                 'max_filesize': 1024 * 1024 * 1024,
@@ -302,10 +302,10 @@ async def callback_handler(event):
                 'preferredquality': '192',
             }]
         else:
-            ydl_opts['format'] = f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<={quality}]/best'
+            ydl_opts['format'] = f'best[ext=mp4][height<={quality}]/best[height<={quality}]'
     
     elif action == "video":
-        ydl_opts['format'] = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best'
+        ydl_opts['format'] = 'best[ext=mp4][height<=720]/best[height<=720]'
 
     await download_queue.put((event, url, ydl_opts))
 
