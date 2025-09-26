@@ -33,6 +33,7 @@ except (TypeError, ValueError):
 client = TelegramClient('bot_session', API_ID, API_HASH)
 download_queue = asyncio.Queue()
 temp_urls = {} # Callback uchun URLlarni vaqtinchalik saqlaydi
+temp_descriptions = {} # Tavsiflarni (description) vaqtinchalik saqlaydi
 playlist_info_cache = {} # Playlist ma'lumotlarini keshlash uchun
 user_locks = {} # Foydalanuvchi so'rovlarini cheklash uchun
 
@@ -74,7 +75,7 @@ async def safe_edit_message(message, text, **kwargs):
         log.warning(f"Xabarni tahrirlashda kutilmagan xatolik: {e}")
 
 async def download_and_send(event, url, ydl_opts):
-    """Videoni yuklaydi va foydalanuvchiga yuboradi."""
+    """Videoni yuklaydi, yuboradi va tavsif (description) uchun tugma taklif qiladi."""
     chat_id = event.chat_id
     processing_message = None
     cookie_file = None
@@ -118,7 +119,7 @@ async def download_and_send(event, url, ydl_opts):
 
         title = info_dict.get('title', 'Nomsiz video')
         uploader = info_dict.get('uploader', 'Noma\'lum manba')
-        caption_text = f"**{title}**\n\nManba: {uploader}\n\nYuklab berildi: @Allsavervide0bot"
+        caption_text = f"**{title}**\n\nManba: {uploader}\n\nYuklab berildi: @Allsavervide0bot" # <-- O'zingizni bot userneumingizni yozing
 
         async def upload_progress(current, total):
             percentage = current * 100 / total
@@ -133,6 +134,13 @@ async def download_and_send(event, url, ydl_opts):
             progress_callback=upload_progress
         )
         await client.delete_messages(chat_id, processing_message)
+        
+        description = info_dict.get('description')
+        if description and description.strip():
+            unique_id = str(uuid.uuid4())
+            temp_descriptions[unique_id] = description
+            buttons = [Button.inline("📝 Post matnini olish", data=f"get_desc_{unique_id}")]
+            await client.send_message(chat_id, "Postning tavsifini (description) olishni xohlaysizmi?", buttons=buttons)
 
     except Exception as e:
         log.error(f"Yuklashda xatolik: {e}")
@@ -164,7 +172,7 @@ async def worker():
             await download_and_send(event, url, ydl_opts)
             
             if user_id in user_locks:
-                del user_locks[user_id] # Vazifa tugagach lockni olib tashlash
+                del user_locks[user_id]
                 
         except Exception as e:
             log.error(f"Worker'da xatolik: {e}")
@@ -233,11 +241,11 @@ async def main_handler(event):
                 'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
                 'outtmpl': 'downloads/%(id)s.%(ext)s',
                 'noplaylist': True,
-                'max_filesize': 1024 * 1024 * 1024, # 1 GB
+                'max_filesize': 1024 * 1024 * 1024,
             }
             await download_queue.put((event, url, ydl_opts))
-            await event.reply("✅ So'rovingiz qabul qilindi va navbatga qo'yildi.")
-        else: # Oddiy YouTube videolari
+            
+        else:
             unique_id = str(uuid.uuid4())
             temp_urls[unique_id] = url
             
@@ -251,9 +259,8 @@ async def main_handler(event):
     except Exception as e:
         log.error(f"Main handlerda xatolik: {e}", exc_info=True)
         await event.reply("❌ Havolani tahlil qilishda xatolik yuz berdi. Iltimos, boshqa havolani urinib ko'ring.")
-        if user_id in user_locks: # Xatolik yuz bersa ham lockni bo'shatish
+        if user_id in user_locks:
             del user_locks[user_id]
-
 
 @client.on(events.CallbackQuery(pattern=b'(quality|video)_'))
 async def callback_handler(event):
@@ -264,7 +271,7 @@ async def callback_handler(event):
 
     user_locks[user_id] = True
     
-    await event.answer("So'rovingiz qabul qilindi va navbatga qo'yildi.")
+    await event.answer()
     
     data_parts = event.data.decode('utf-8').split('_', 2)
     action = data_parts[0]
@@ -282,7 +289,7 @@ async def callback_handler(event):
     ydl_opts = {
         'outtmpl': 'downloads/%(id)s.%(ext)s',
         'noplaylist': True,
-        'max_filesize': 1024 * 1024 * 1024, # 1 GB
+        'max_filesize': 1024 * 1024 * 1024,
     }
 
     if action == "quality":
@@ -297,10 +304,32 @@ async def callback_handler(event):
         else:
             ydl_opts['format'] = f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<={quality}]/best'
     
-    elif action == "video": # Playlistdan kelgan video
+    elif action == "video":
         ydl_opts['format'] = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best'
 
     await download_queue.put((event, url, ydl_opts))
+
+@client.on(events.CallbackQuery(pattern=b"get_desc_"))
+async def description_handler(event):
+    """Post matnini (description) olish tugmasi bosilganda ishlaydi."""
+    unique_id = event.data.decode('utf-8').replace('get_desc_', '')
+    description = temp_descriptions.get(unique_id)
+
+    if not description:
+        await event.answer("Kechirasiz, bu so'rov eskirgan yoki matn topilmadi.", alert=True)
+        try:
+            await event.edit("So'rov muddati o'tgan.")
+        except MessageNotModifiedError:
+            pass
+        return
+
+    await event.delete()
+
+    for i in range(0, len(description), 4096):
+        await event.respond(description[i:i+4096])
+
+    if unique_id in temp_descriptions:
+        del temp_descriptions[unique_id]
 
 
 async def main():
